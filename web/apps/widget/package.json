@@ -1,0 +1,11 @@
+{
+  "name": "@codura/widget",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ../../scripts/placeholder-build.mjs",
+    "typecheck": "node -e \"\"",
+    "test": "node -e \"\""
+  }
+}

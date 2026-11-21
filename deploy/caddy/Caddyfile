@@ -1,0 +1,26 @@
+# Single entry point (ADR-0013). Local: http on :8080. Production overrides the site address
+# with the real domain for automatic TLS (compose.prod.yml, M6).
+{
+	admin off
+}
+
+:8080 {
+	encode gzip zstd
+
+	# API + health. flush_interval -1 keeps SSE answers streaming (ADR-0012).
+	@backend path /api/* /healthz /readyz
+	handle @backend {
+		reverse_proxy api:8000 {
+			flush_interval -1
+		}
+	}
+
+	# /metrics is internal only (ADR-0022).
+	handle /metrics {
+		respond 404
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+}

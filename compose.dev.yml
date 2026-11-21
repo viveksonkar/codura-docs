@@ -1,0 +1,17 @@
+# Development override: hot reload and a host port for Postgres (for running tests from the host).
+#   docker compose -f docker-compose.yml -f compose.gpu.yml -f compose.dev.yml up -d
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+  api:
+    command: ["codura-docs", "serve", "--reload"]
+    volumes:
+      - ./backend/src/codura_docs:/app/.venv/lib/python3.12/site-packages/codura_docs:ro
+      - ./config:/app/config:ro
+      - blobs:/data/blobs
+  worker:
+    volumes:
+      - ./backend/src/codura_docs:/app/.venv/lib/python3.12/site-packages/codura_docs:ro
+      - ./config:/app/config:ro
+      - blobs:/data/blobs

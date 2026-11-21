@@ -1,0 +1,145 @@
+[project]
+name = "codura-docs"
+version = "0.1.0"
+description = "Codura Docs backend: API + ingestion worker (multi-tenant, local-first RAG)"
+requires-python = ">=3.12,<3.14"
+license = { text = "Proprietary" }
+dependencies = [
+  "fastapi>=0.115.6",
+  "uvicorn[standard]>=0.32.1",
+  "pydantic>=2.10.3",
+  "pydantic-settings>=2.6.1",
+  "sqlalchemy[asyncio]>=2.0.36",
+  "psycopg[binary]>=3.2.3",
+  "alembic>=1.14.0",
+  "httpx>=0.28.1",
+  "typer>=0.15.1",
+  "cryptography>=44.0.0",
+  "argon2-cffi>=23.1.0",
+  "prometheus-client>=0.21.1",
+  "python-ulid>=3.0.0",
+  "pyyaml>=6.0.2",
+  "aiosmtplib>=3.0.2",
+  "boto3>=1.35.80",
+  "python-multipart>=0.0.20",
+  "pypdf>=5.1.0",
+  "pypdfium2>=4.30.0",
+  "python-docx>=1.1.2",
+  "beautifulsoup4>=4.12.3",
+  "pillow>=11.0.0",
+  "pytesseract>=0.3.13",
+  "lingua-language-detector>=2.0.2",
+]
+
+[project.scripts]
+codura-docs = "codura_docs.cli:app"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3.4",
+  "pytest-asyncio>=0.25.0",
+  "ruff>=0.8.4",
+  "mypy>=1.13.0",
+  "import-linter>=2.1",
+  "types-pyyaml>=6.0.12.20241221",
+  "moto[s3]>=5.0.22",
+]
+
+[build-system]
+requires = ["hatchling>=1.26.3"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/codura_docs"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "RUF", "SIM", "PT"]
+ignore = [
+  "E501",   # layout is owned by `ruff format`; long SQL/message strings are allowed
+  "S101",   # assert is fine in tests and for type narrowing
+  "RUF001", "RUF002", "RUF003",  # non-ASCII text is intentional (multilingual)
+]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fastapi.Query"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S108", "S311", "PT018"]
+"scripts/**" = ["S105", "S106", "S311"]  # local verification tools with throwaway credentials
+"migrations/**" = ["S608"]  # DDL built from constant identifiers only
+# SQL identifiers come from constant column allowlists; all values are bound parameters.
+"src/codura_docs/services/*.py" = ["S608"]
+"src/codura_docs/api/routers/**" = ["B008"]  # FastAPI dependency idiom
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+packages = ["codura_docs"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["boto3.*", "botocore.*", "moto.*", "pytesseract.*", "pypdfium2.*", "lingua.*", "docx.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+markers = [
+  "integration: needs Postgres (set CODURA_TEST_PG_ADMIN_URL)",
+  "ollama: needs a running Ollama with the configured models (set CODURA_TEST_OLLAMA_URL)",
+  "mailpit: needs a running Mailpit (set CODURA_TEST_SMTP_HOST)",
+]
+filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]
+
+# ----------------------------------------------------------------------------------------------
+# Import boundaries (CLAUDE.md invariants, architecture.md §3). Run: uv run lint-imports
+# ----------------------------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "codura_docs"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Domain is pure: no I/O, no infrastructure, no adapters"
+type = "forbidden"
+source_modules = ["codura_docs.domain"]
+forbidden_modules = [
+  "httpx", "sqlalchemy", "psycopg", "fastapi", "boto3", "aiosmtplib", "alembic",
+  "codura_docs.db", "codura_docs.adapters", "codura_docs.api", "codura_docs.registry",
+]
+
+[[tool.importlinter.contracts]]
+name = "Ports, not vendors: only adapters import vendor/IO client libraries"
+type = "forbidden"
+source_modules = [
+  "codura_docs.domain", "codura_docs.ports", "codura_docs.services", "codura_docs.api",
+  "codura_docs.worker", "codura_docs.db", "codura_docs.jobs", "codura_docs.metering",
+  "codura_docs.billing", "codura_docs.platform",
+]
+forbidden_modules = ["httpx", "boto3", "botocore", "aiosmtplib"]
+allow_indirect_imports = true
+
+[[tool.importlinter.contracts]]
+name = "Adapters depend on ports only (never services, domain logic, db or api)"
+type = "forbidden"
+source_modules = ["codura_docs.adapters"]
+forbidden_modules = [
+  "codura_docs.services", "codura_docs.domain", "codura_docs.db", "codura_docs.api",
+  "codura_docs.registry", "codura_docs.platform", "codura_docs.metering", "codura_docs.billing",
+]
+
+[[tool.importlinter.contracts]]
+name = "Only platform routes may use the cross-Tenant platform package"
+type = "forbidden"
+source_modules = [
+  "codura_docs.domain", "codura_docs.services", "codura_docs.db", "codura_docs.adapters",
+  "codura_docs.ports", "codura_docs.worker", "codura_docs.jobs", "codura_docs.metering",
+  "codura_docs.billing", "codura_docs.api.routers.admin", "codura_docs.api.routers.public",
+]
+forbidden_modules = ["codura_docs.platform"]
