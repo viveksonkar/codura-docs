@@ -1,0 +1,19 @@
+I want to build a system where user can perforam below action - 
+
+1. upload documents - pdf, docx etc
+2. system generates embeddings for rag
+
+user can then asks queries through an chat box. 
+The chat box should provide multiple platforms support like - 
+
+android app, web app for websites and plugin (which is more suitable and better) for wordpress websites
+
+
+DB - vector database postgress
+
+I want full docker compose so that I can spin the environemnt locally very quickly to test and then take it to production
+
+use everything on local, so that I don't want to incur any cost for llm usage. preferably use ollama
+
+Read LLM usage  -
+design in such a way that tomorrow if I need to switch to different LLM I should be able to switch easily.
