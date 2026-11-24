@@ -1,7 +1,7 @@
 # One backend image for migrate, api and worker (ADR-0013). Build context: repo root.
 # syntax=docker/dockerfile:1.7
 
-FROM python:3.12.8-slim-bookworm AS base
+FROM python:3.15.1-slim-bookworm AS base
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
