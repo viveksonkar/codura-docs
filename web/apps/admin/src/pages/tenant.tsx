@@ -249,49 +249,6 @@ export function Settings({ canEdit, onChange }: { canEdit: boolean; onChange: ()
   );
 }
 
-export function Keys() {
-  const keys = useData<{ items: { id: string; kind: string; prefix: string; name: string; channel: string | null; assistant_id: string | null; revoked_at: string | null; created_at: string }[] }>("/api/admin/channel-keys");
-  const assistants = useData<{ items: { id: string; name: string }[] }>("/api/admin/assistants");
-  const [form, setForm] = useState({ kind: "channel", channel: "widget", assistant_id: "", name: "", allowed_origins: "" });
-  const [created, setCreated] = useState("");
-  const [err, setErr] = useState("");
-  return (
-    <>
-      <h1>API & Channel keys</h1>
-      <p className="muted">Channel Keys (pk_…) are publishable and only allow chatting with one Assistant. Secret Keys (sk_…) access the admin API — never put them in a web page or app.</p>
-      <div className="card form">
-        <div className="inline">
-          <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value })}><option value="channel">Channel Key</option><option value="secret">Secret Key</option></select>
-          {form.kind === "channel" && <>
-            <select value={form.channel} onChange={(e) => setForm({ ...form, channel: e.target.value })}>
-              {["widget", "hosted", "api"].map((c) => <option key={c}>{c}</option>)}</select>
-            <select value={form.assistant_id} onChange={(e) => setForm({ ...form, assistant_id: e.target.value })}>
-              <option value="">Choose assistant…</option>{assistants.data?.items.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
-          </>}
-          <input placeholder="Label" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        </div>
-        {form.kind === "channel" && form.channel === "widget" && <label>Allowed origins (comma-separated, e.g. https://www.example.com)<input value={form.allowed_origins} onChange={(e) => setForm({ ...form, allowed_origins: e.target.value })} /></label>}
-        <Alert>{err}</Alert>
-        {created && <Alert kind="ok">Copy this key now — it is shown only once: <code className="secret">{created}</code></Alert>}
-        <button onClick={async () => {
-          try {
-            const r = await post<{ key: string }>("/api/admin/channel-keys", { ...form, allowed_origins: form.allowed_origins.split(",").map((s) => s.trim()).filter(Boolean) });
-            setCreated(r.key); setErr(""); void keys.reload();
-          } catch (e) { setErr(errorText(e)); }
-        }}>Create key</button>
-      </div>
-      <table>
-        <thead><tr><th>Key</th><th>Type</th><th>Channel</th><th>Label</th><th>Created</th><th /></tr></thead>
-        <tbody>{keys.data?.items.map((k) => (
-          <tr key={k.id} className={k.revoked_at ? "revoked" : ""}>
-            <td><code>{k.prefix}…</code></td><td>{k.kind}</td><td>{k.channel ?? "—"}</td><td>{k.name}</td><td>{when(k.created_at)}</td>
-            <td>{k.revoked_at ? "revoked" : <button className="link danger" onClick={async () => { await post(`/api/admin/channel-keys/${k.id}/revoke`); void keys.reload(); }}>Revoke</button>}</td>
-          </tr>))}</tbody>
-      </table>
-    </>
-  );
-}
-
 export function NotVerified({ email }: { email: string }) {
   const [sent, setSent] = useState(false);
   return (

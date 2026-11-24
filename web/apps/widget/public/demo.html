@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Codura Chat: widget demo (dev only)</title>
+    <style>
+      body { font: 16px/1.5 system-ui, sans-serif; margin: 0 auto; max-width: 860px; padding: 24px 16px 120px; color: #111827; background: #f9fafb; }
+      code { background: #e5e7eb; padding: 1px 4px; border-radius: 4px; }
+      .inline { height: 520px; margin-top: 12px; }
+      .warn { background: #fef3c7; padding: 8px 12px; border-radius: 8px; }
+      form { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+      input { flex: 1; min-width: 260px; padding: 6px 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>Widget demo</h1>
+    <p class="warn">Development only. In production, widget keys are refused from this origin (ADR-0025).</p>
+    <p>This page embeds the same <code>widget.js</code> a customer site would. Pass a Channel Key with
+      <code>?key=pk_…</code>; without one it uses the seeded demo Tenant's dev widget key.</p>
+    <form id="f">
+      <input name="key" placeholder="pk_…" aria-label="Channel Key" />
+      <select name="lang" aria-label="Language">
+        <option value="auto">auto</option><option>en</option><option>hi</option><option>es</option>
+        <option>fr</option><option>de</option><option>ar</option><option>zh</option>
+      </select>
+      <button>Load</button>
+    </form>
+    <h2>Inline</h2>
+    <div id="inline" class="inline"></div>
+    <h2>Launcher</h2>
+    <p>The floating bubble in the corner. JS API:
+      <button type="button" onclick="CoduraChat.open()">open()</button>
+      <button type="button" onclick="CoduraChat.send('How long is the warranty?')">send()</button>
+    </p>
+    <script src="/widget/v1/widget.js"></script>
+    <script>
+      (function () {
+        var q = new URLSearchParams(location.search);
+        var key = q.get("key") || "pk_demo_widget_local_only_00000000000000000000000";
+        var lang = q.get("lang") || "auto";
+        var f = document.getElementById("f");
+        f.key.value = key;
+        f.lang.value = lang;
+        function el(mode) {
+          var c = document.createElement("codura-chat");
+          c.setAttribute("key", key);
+          c.setAttribute("api", location.origin);
+          c.setAttribute("mode", mode);
+          c.setAttribute("lang", lang);
+          return c;
+        }
+        document.getElementById("inline").appendChild(el("inline"));
+        document.body.appendChild(el("launcher"));
+      })();
+    </script>
+  </body>
+</html>

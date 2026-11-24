@@ -56,13 +56,17 @@ api_keys(id PK, tenant_id, kind CHECK (kind IN ('secret','channel')), prefix, ke
          name, channel CHECK (channel IN ('hosted','widget','wordpress','android','api')) NULL,
          assistant_id NULL, allowed_origins text[] DEFAULT '{}', rate_limit_per_min int NULL,
          revoked_at NULL, last_used_at NULL, created_at,
+         public_key_enc bytea NULL,  -- hosted keys only, crypto.py-encrypted (ADR-0025, migration 0003)
          FOREIGN KEY (tenant_id, assistant_id) REFERENCES assistants(tenant_id, id))
 ```
 
 Key lookup (`WHERE key_hash = $1`) happens **before** a Tenant is known. It runs through one
 narrow `SECURITY DEFINER` function, `resolve_api_key(hash) → (key_id, tenant_id, kind, channel,
 assistant_id, allowed_origins, revoked)`, so `codura_app` never needs cross-Tenant read access.
-The hosted-page lookup works the same way through `resolve_hosted(tenant_slug, assistant_slug)`.
+The hosted-page lookup works the same way through `resolve_hosted(tenant_slug, assistant_slug) →
+(tenant_id, assistant_id, public_key_enc)`. It returns a row only for an enabled Assistant of an
+active Tenant with an active `hosted` key; the partial unique index `api_keys_one_hosted` allows at
+most one per Assistant. `touch_api_key(key_id)` updates `last_used_at` at most once a minute.
 
 ## 3. Jobs (M0-03 table, M0-06 behaviour)
 

@@ -116,6 +116,29 @@ export interface ChannelClientOptions {
   channelKey: string;
   storage?: KeyValueStore;
   clientName?: string;
+  /** UI locale: selects welcome text and consent text (not the answer language). */
+  language?: string | undefined;
+}
+
+export interface ChannelConfig {
+  assistant: { id: string; name: string; welcome_text: string; default_language: string };
+  theme: { accent?: string; position?: "left" | "right"; title?: string; logo_url?: string | null; [k: string]: unknown };
+  ui_languages: string[];
+  features: { feedback: boolean; citations: boolean };
+  visitor_email: { mode: "off" | "optional" | "required"; consent_text: string; privacy_url: string | null };
+  branding: boolean;
+  limits: { max_question_chars: number };
+}
+
+export interface HistoryMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  language: string | null;
+  citations: Citation[];
+  feedback: 1 | -1 | null;
+  finish_reason: string | null;
+  created_at: string;
 }
 
 /** Public Chat API client for Channels. Visitor + Conversation ids are stored per Channel Key. */
@@ -146,22 +169,53 @@ export class ChannelClient {
     this.storage.set(this.key("conversation"), id ?? "");
   }
 
+  /** A per-key flag store for small client state (e.g. "pre-chat form done"). */
+  getFlag(name: string): string | null {
+    return this.storage.get(this.key(name)) || null;
+  }
+
+  setFlag(name: string, value: string | null): void {
+    this.storage.set(this.key(name), value ?? "");
+  }
+
+  set language(code: string | undefined) {
+    this.opts.language = code;
+  }
+
   private headers(): Record<string, string> {
-    return {
+    const h: Record<string, string> = {
       Authorization: `Bearer ${this.opts.channelKey}`,
       "X-Codura-Visitor": this.visitorId,
       "X-Codura-Client": this.opts.clientName ?? "chat-client/0.1.0",
     };
+    if (this.opts.language) h["Accept-Language"] = this.opts.language;
+    return h;
   }
 
   private url(path: string): string {
     return this.opts.apiUrl.replace(/\/+$/, "") + apiPath(path);
   }
 
-  async config(): Promise<Record<string, unknown>> {
-    const res = await fetch(this.url("channel/config"), { headers: this.headers() });
+  async config(): Promise<ChannelConfig> {
+    const res = await fetch(this.url("channel/config"), { headers: this.headers(), credentials: "omit" });
     if (!res.ok) throw await errorFrom(res);
-    return (await res.json()) as Record<string, unknown>;
+    return (await res.json()) as ChannelConfig;
+  }
+
+  /** Restore the stored Conversation; a 404 (other device, purged, revoked) forgets it. */
+  async history(): Promise<HistoryMessage[]> {
+    const id = this.conversationId;
+    if (!id) return [];
+    const res = await fetch(this.url(`conversations/${encodeURIComponent(id)}/messages`), {
+      headers: this.headers(),
+      credentials: "omit",
+    });
+    if (res.status === 404) {
+      this.conversationId = null;
+      return [];
+    }
+    if (!res.ok) throw await errorFrom(res);
+    return ((await res.json()) as { items: HistoryMessage[] }).items;
   }
 
   async *ask(question: string, opts: { signal?: AbortSignal; visitorEmail?: string; consent?: boolean } = {}) {
@@ -178,10 +232,11 @@ export class ChannelClient {
   }
 
   async feedback(messageId: string, value: 1 | -1, note?: string): Promise<void> {
-    const res = await fetch(this.url(`messages/${messageId}/feedback`), {
+    const res = await fetch(this.url(`messages/${encodeURIComponent(messageId)}/feedback`), {
       method: "POST",
       headers: { ...this.headers(), "Content-Type": "application/json" },
       body: JSON.stringify({ value, note }),
+      credentials: "omit",
     });
     if (!res.ok) throw await errorFrom(res);
   }

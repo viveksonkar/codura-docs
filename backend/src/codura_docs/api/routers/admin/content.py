@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.responses import StreamingResponse
 
 from codura_docs.api.deps import TenantAccess, require_tenant
@@ -14,7 +14,7 @@ from codura_docs.api.errors import ApiError
 from codura_docs.api.sse import sse_response
 from codura_docs.db.session import tenant_session
 from codura_docs.domain.language import ocr_languages_valid
-from codura_docs.services import answering
+from codura_docs.services import answering, channel_keys
 from codura_docs.services import assistants as assistants_svc
 from codura_docs.services import documents as docs
 
@@ -191,6 +191,16 @@ async def chunks(doc_id: str, request: Request, a: TenantAccess = READ) -> dict[
 # --- Assistants (no model field: ADR-0019) ------------------------------------------------------------
 
 
+class ThemeIn(BaseModel):
+    """Rendered on Visitors' pages, so it is an allowlist (SEC-07)."""
+
+    model_config = ConfigDict(extra="forbid")
+    title: str | None = Field(default=None, max_length=80)
+    accent: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{3,8}$")
+    position: Literal["left", "right"] | None = None
+    logo_url: str | None = Field(default=None, max_length=500, pattern=r"^https://\S+$")
+
+
 class AssistantIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     slug: str | None = Field(default=None, max_length=40)
@@ -202,9 +212,9 @@ class AssistantIn(BaseModel):
     limit_reached_text: dict[str, str] | None = None
     visitor_email: Literal["off", "optional", "required"] | None = None
     visitor_email_consent: dict[str, str] | None = None
-    privacy_url: str | None = Field(default=None, max_length=500)
+    privacy_url: str | None = Field(default=None, max_length=500, pattern=r"^https?://\S+$")
     retrieval: dict[str, Any] | None = None
-    theme: dict[str, Any] | None = None
+    theme: ThemeIn | None = None
     hosted_enabled: bool | None = None
 
 
@@ -222,7 +232,11 @@ async def create_assistant(
         raise ApiError(422, "validation_error", "name is required")
     try:
         async with tenant_session(request.app.state.engine, a.ctx) as s:
-            return await assistants_svc.create(s, a.tenant_id, body.model_dump(exclude_none=True))
+            item = await assistants_svc.create(s, a.tenant_id, body.model_dump(exclude_none=True))
+            await channel_keys.sync_hosted_key(
+                s, request.app.state.keyring, a.tenant_id, item["id"], item["hosted_enabled"]
+            )
+            return item
     except assistants_svc.AssistantError as exc:
         raise ApiError(exc.status, exc.code, str(exc)) from exc
 
@@ -245,6 +259,10 @@ async def patch_assistant(
     try:
         async with tenant_session(request.app.state.engine, a.ctx) as s:
             item = await assistants_svc.update(s, assistant_id, body.model_dump(exclude_none=True))
+            if item is not None and body.hosted_enabled is not None:
+                await channel_keys.sync_hosted_key(
+                    s, request.app.state.keyring, a.tenant_id, assistant_id, item["hosted_enabled"]
+                )
     except assistants_svc.AssistantError as exc:
         raise ApiError(exc.status, exc.code, str(exc)) from exc
     if item is None:

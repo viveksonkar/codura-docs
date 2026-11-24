@@ -74,6 +74,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fa
 "migrations/**" = ["S608"]  # DDL built from constant identifiers only
 # SQL identifiers come from constant column allowlists; all values are bound parameters.
 "src/codura_docs/services/*.py" = ["S608"]
+"src/codura_docs/api/routers/admin/conversations.py" = ["S608"]  # WHERE built from constant fragments; values bound
 "src/codura_docs/api/routers/**" = ["B008"]  # FastAPI dependency idiom
 
 [tool.mypy]

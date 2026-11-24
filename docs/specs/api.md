@@ -42,8 +42,8 @@ Codes: `unauthenticated` 401, `forbidden` 403, `origin_not_allowed` 403, `not_fo
 | **Platform** `GET /api/platform/model-profiles` (M1) · `POST/PATCH …` + `POST …/{id}/test` (M3) | Model Profiles incl. Tenant-scoped Custom LLM profiles; credentials write-only |
 | **Platform** `GET/PATCH /api/platform/cost-rates` · `/plans` · `/finance/*` (M3) | Pricing inputs, Plans, finance views ([billing.md](../billing.md)) |
 | **Platform** `GET /api/platform/audit` · `POST /api/platform/admins/invites` | Audit log; invite Platform Admins |
-| `GET /api/admin/usage` · `GET /api/admin/insights/*` | Tenant usage vs limits, insights (quantities only, never COGS or model names) |
-| `GET /api/admin/visitor-emails` · `DELETE …?email=` (M2) | Captured Visitor emails, Tenant Admin only (ADR-0023) |
+| `GET /api/admin/usage` · `GET /api/admin/insights/summary?days=` · `GET …/insights/unanswered?days=&limit=` | Tenant usage vs limits with a month-end projection, conversations by Channel and language, feedback ratio, unanswered questions (fallback or 👎). Quantities and the Tenant's own question text only, never COGS or model names. Tenant Admins and Users |
+| `GET /api/admin/visitor-emails` · `GET …/export` (CSV) · `DELETE …?email=` (M2) | Captured Visitor emails, Tenant Admin only (ADR-0023). Delete erases that email from every Conversation of the Tenant → `{deleted: n}`, 404 if none |
 | `GET /api/admin/billing` · `POST …/checkout` · `POST …/portal` (M3) | Tenant billing |
 | `POST /api/webhooks/payments/{provider}` (M3) | Signature-verified, idempotent (SEC-20) |
 | `GET/PATCH /api/admin/tenant` | Current Tenant settings (name, `ocr_languages`, `default_language`) |
@@ -55,8 +55,8 @@ Codes: `unauthenticated` 401, `forbidden` 403, `origin_not_allowed` 403, `not_fo
 | `GET /api/admin/documents/{doc_id}/chunks` | Chunk inspector |
 | `GET/POST /api/admin/assistants` · `GET/PATCH/DELETE …/{asst_id}` | Assistant config (FR-32) |
 | `POST /api/admin/assistants/{asst_id}/playground/stream` | Same SSE contract as §3.3, plus a `debug` event with the Context Pack |
-| `GET /api/admin/conversations` · `GET …/{conv_id}` | Log viewer (M2) |
-| `GET/POST /api/admin/channel-keys` · `POST …/{id}/revoke` | Channel Keys; secret value returned once (M2) |
+| `GET /api/admin/conversations?assistant_id=&channel=&language=&feedback=up\|down\|any\|none&outcome=&from=&to=&limit=&cursor=` · `GET …/{conv_id}` | Log viewer (M2): detail includes Citations and the retrieval debug; never model names, COGS or Visitor emails (only `has_visitor_email`). Tenant Admins and Users |
+| `GET /api/admin/channel-keys?assistant_id=` · `POST …` · `PATCH …/{id}` (`allowed_origins`) · `POST …/{id}/revoke` | Channel Keys (`widget`/`wordpress`/`android`/`api`) and Secret Keys; value returned once. `hosted` keys are system-managed by the Assistant's `hosted_enabled` toggle and can't be created or revoked by hand (ADR-0025). Allowed Origins: `scheme://host[:port]`, ≤ 20, normalised |
 | `GET /api/admin/jobs?status=` | Job monitor |
 
 ## 3. Public Chat API v1 (frozen at M1-08)
@@ -66,7 +66,14 @@ Codes: `unauthenticated` 401, `forbidden` 403, `origin_not_allowed` 403, `not_fo
   Tenant and Assistant.** No request field, header or path segment can select a Tenant, and IDs
   from another Tenant (e.g. a `conversation_id`) return 404, never 403, so they can't be probed.
 - Revoked keys and keys of suspended Tenants → 401.
-- `Origin` must be in Allowed Origins for `widget`/`wordpress` keys (SEC-05).
+- A browser `Origin` must be allowed for the key (SEC-05, ADR-0025): `hosted` → the platform's own
+  origin; `widget`/`wordpress` → Allowed Origins (empty = none; the platform origin is also allowed
+  outside production for the `/demo/` page); `api`/`android` → no browser origin. A request without
+  `Origin` is not a browser and is bounded by SEC-06 limits alone. Otherwise 403
+  `origin_not_allowed`. CORS reflects only an accepted origin, never `*` or credentials.
+- Limits (SEC-06): per-IP bucket on every public route; chat adds per-key, per-Tenant and
+  per-Visitor buckets and concurrency caps per key and per Tenant → 429 `rate_limited` with
+  `Retry-After`. Questions longer than `CHAT_MAX_QUESTION_CHARS` → 422.
 - `X-Codura-Visitor: <uuid>` (required; client-generated, persisted).
 - `X-Codura-Client: hosted/1.0.0` | `widget/1.2.0` | `wordpress/1.0.0` | `android/1.0.0` (informational).
 - `Accept-Language` selects welcome text and UI strings. It does **not** decide the answer
@@ -92,7 +99,9 @@ Request:
 { "question": "How do I reset the X200?", "conversation_id": "conv_…",     // conversation_id optional
   "visitor_email": "a@b.com", "consent": true }                            // optional; first message only (ADR-0023)
 ```
-`required` email setting without an email → 422 `visitor_email_required`. Quota exhausted → normal
+`required` email setting without an email → 422 `visitor_email_required`; an invalid email → 422
+`validation_error`; an email without `consent: true` → 422 `consent_required`. With the setting
+`off`, a sent email is ignored. Quota exhausted → normal
 stream with `done.finish_reason: "limit"` and the Assistant's limit-reached text (no LLM call).
 `channel/config` exposes `visitor_email: {mode, consent_text, privacy_url}` and `branding: bool`.
 Response: `200 text/event-stream`. Each event is `event: <type>\ndata: <json>\n\n`:
@@ -109,8 +118,8 @@ Rules: clients **ignore unknown event types**; a client disconnect cancels gener
 (`finish_reason: "cancelled"` is persisted); a keep-alive comment `: ping` is sent every 15 s;
 pre-stream failures (auth, validation, rate limit) are normal JSON errors (§1.3), not SSE.
 
-Shared fixtures: `docs/specs/fixtures/sse/*.txt` (created in M1-08) — both the TS and Kotlin
-clients test against them.
+Shared fixtures: `docs/specs/fixtures/sse/*.txt` (added in M2; see its README). Both the TS and
+Kotlin clients test against them.
 
 ### 3.4 `GET /api/v1/conversations/{conv_id}/messages`
 Restores history for the same Channel Key's Tenant and the same Visitor ID (404 otherwise). Returns Messages with Citations.

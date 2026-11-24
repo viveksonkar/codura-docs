@@ -1,0 +1,87 @@
+name: e2e
+
+# Full-stack checks with real local models (CPU on CI, so slow): on main, nightly and on demand.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  COMPOSE_FILE: docker-compose.yml # CPU variant: CI has no GPU
+
+jobs:
+  # NFR-01 / M1-14: once models are pulled, the full flow works with no route to the internet.
+  egress:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - name: build images
+        run: docker compose build migrate web
+      - name: pull models (online, once)
+        run: docker compose up -d ollama && docker compose run --rm ollama-init && docker compose down
+      - name: start the stack on an internal-only network
+        run: |
+          export COMPOSE_FILE=docker-compose.yml:compose.egress.yml
+          docker compose up -d
+          # the worker has no healthcheck, so poll readiness instead of --wait
+          for i in $(seq 1 120); do
+            # /readyz answers 503 until every check passes, so urlopen raises until then
+            docker compose exec -T api python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz')" && break
+            sleep 5
+          done
+      - name: prove there is no egress
+        run: |
+          export COMPOSE_FILE=docker-compose.yml:compose.egress.yml
+          if docker compose exec -T api python -c "import urllib.request; urllib.request.urlopen('https://example.com', timeout=10)"; then
+            echo "egress is possible: the test network is not isolated" && exit 1
+          fi
+      - name: full flow (signup, OCR, multilingual answers, email) with no egress
+        run: |
+          net="$(docker network ls --format '{{.Name}}' | grep '_default$' | head -1)"
+          docker run --rm --network "$net" -v "$PWD/backend/scripts:/scripts:ro" codura-docs-backend:dev \
+            python /scripts/live_e2e.py --base http://caddy:8080 --mailpit http://mailpit:8025
+      - name: logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f compose.egress.yml logs --tail 200
+
+  # M2-09: web Channel parity checklist + Admin Console UI on the compose stack (Playwright).
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - name: start the stack
+        run: |
+          docker compose up -d --build
+          for i in $(seq 1 240); do curl -fsS http://localhost:8080/readyz | grep -q '"status":"ok"' && break; sleep 5; done
+      - name: smoke
+        run: bash scripts/smoke.sh
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.18.1
+      - name: playwright
+        working-directory: tests/e2e
+        run: |
+          pnpm install --ignore-workspace
+          pnpm exec playwright install --with-deps chromium
+          pnpm test
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: tests/e2e/playwright-report
+      - name: logs on failure
+        if: failure()
+        run: docker compose logs --tail 200

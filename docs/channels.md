@@ -80,9 +80,15 @@ Android SDK ──────── (M4: Kotlin port of the same client)       
 - JS API: `window.CoduraChat.open() / close() / send(text) / setLanguage(code) / on('message', fn)`.
 - UI strings: `web/apps/widget/src/i18n/<lang>.json` for the launch language set (Q3). Missing
   keys fall back to `en`.
-- Build: Vite library mode produces `widget.js` (IIFE) and `widget.esm.js`, served with versioned
-  paths and long cache.
-- Local test page: `http://localhost:8080/demo/?key=pk_…` (dev only).
+- Build: Vite library mode produces `widget.js` (IIFE) and `widget.esm.js` (plus `hosted.js` for
+  the Hosted Chat Page), served under the versioned path `/widget/v1/`. CI fails if gzipped
+  `widget.js` exceeds 40 KB (NFR-08). Because `v1` is a major-version path, not a per-release one,
+  it is cached for 1 hour with `stale-while-revalidate` so fixes reach sites quickly. Immutable,
+  year-long caching comes with per-release paths (`/widget/1.0.0/`) in M6.
+- Events on the element: `codura:ready`, `codura:message`.
+- Local test page: `http://localhost:8080/demo/?key=pk_…` (dev only). Without `?key` it uses the
+  seeded demo Tenant's dev widget key. In production widget keys are refused from the platform
+  origin, so the page does nothing there.
 
 ## 4. WordPress plugin (`wordpress/codura-docs-chat`) — M4, local distribution
 

@@ -86,7 +86,7 @@ Each is enforced by import-linter, a test or review. Breaking one needs an ADR f
 
 ```
 cp .env.example .env && docker compose up -d     # whole stack; GPU via COMPOSE_FILE in .env
-scripts/smoke.ps1   (or scripts/smoke.sh)         # M0 exit check against the running stack
+scripts/smoke.ps1   (or scripts/smoke.sh)         # M0 + M2 exit check against the running stack
 cd backend && uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run lint-imports
 cd backend && uv run pytest                       # unit + contract[fake]; integration needs Postgres:
   CODURA_TEST_PG_ADMIN_URL=postgresql+psycopg://codura_owner:codura@127.0.0.1:5432/postgres
@@ -94,8 +94,13 @@ cd backend && uv run pytest                       # unit + contract[fake]; integ
   CODURA_TEST_OLLAMA_URL=http://localhost:11434 uv run pytest -m ollama   # live model contracts
 cd backend && uv run python scripts/live_e2e.py   # real models + OCR + email, end to end
 cd backend && uv run python scripts/eval.py       # golden multilingual eval report
-pnpm -C web install && pnpm -C web -r test && pnpm -C web -r build
+pnpm -C web install && pnpm -C web -r test && pnpm -C web -r build   # build fails if widget.js > 40 KB gz
+cd tests/e2e && pnpm install --ignore-workspace && pnpm install-browsers && pnpm test  # Playwright, running stack
+COMPOSE_FILE=docker-compose.yml:compose.egress.yml docker compose up -d   # NFR-01 no-egress stack (CI: e2e.yml)
 ```
+
+Hosted Chat Page: http://localhost:8080/c/demo/help · Widget demo: http://localhost:8080/demo/ (dev only).
+Host-side backend tools live in `backend/.venv/Scripts/` when `uv` isn't on PATH.
 
 Windows host: async psycopg needs the selector event loop (handled in `cli.run_async` and tests).
 Admin Console: http://localhost:8080 · Mailpit: http://localhost:8025 · demo Tenant Admin

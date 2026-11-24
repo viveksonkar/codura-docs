@@ -1,0 +1,12 @@
+event: meta
+data: {"conversation_id":"conv_fixture1","message_id":"msg_fixture_a3","user_message_id":"msg_fixture_u3","language":"en"}
+
+event: delta
+data: {"text":"Sorry, I couldn't find that in our documents. Please rephrase or contact us directly."}
+
+event: citations
+data: {"items":[]}
+
+event: done
+data: {"finish_reason":"fallback","latency_ms":120}
+

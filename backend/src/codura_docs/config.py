@@ -159,6 +159,17 @@ class Settings(BaseSettings):
     trial_max_output_tokens: int = 800
     trial_seats: int = 3
 
+    # Public Chat API abuse limits (SEC-06). Buckets refill continuously; 0 disables a bucket.
+    chat_rate_per_key_per_min: int = 60
+    chat_rate_per_tenant_per_min: int = 120
+    chat_rate_per_visitor_per_min: int = 10
+    chat_max_concurrent_per_key: int = 4
+    chat_max_concurrent_per_tenant: int = 6
+    chat_max_question_chars: int = 2000
+    public_rate_per_ip_per_min: int = 120  # config, history, feedback
+    hosted_lookup_per_ip_per_min: int = 30
+    trust_forwarded_for: bool = True  # Caddy is the only entry point (ADR-0013)
+
     max_upload_mb: int = 50
     max_pages: int = 500
     worker_concurrency: int = 2

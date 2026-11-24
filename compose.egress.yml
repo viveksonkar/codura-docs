@@ -1,0 +1,8 @@
+# NFR-01 egress test: the whole stack on an internal-only network (no route to the internet).
+# Pull the models first while online, then:
+#   COMPOSE_FILE=docker-compose.yml:compose.egress.yml docker compose up -d --wait
+# Published ports don't work on an internal network; drive the stack from a container on it
+# (see .github/workflows/e2e.yml, job `egress`).
+networks:
+  default:
+    internal: true

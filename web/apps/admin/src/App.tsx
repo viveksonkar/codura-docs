@@ -3,7 +3,10 @@ import { type Me, ApiError, get, post, setCsrf } from "./api";
 import { AssistantDetail, Assistants } from "./pages/assistants";
 import { ForgotPassword, Login, Signup, TokenAction } from "./pages/auth";
 import { PlatformAudit, PlatformModels, PlatformTenants } from "./pages/platform";
-import { Dashboard, KnowledgeBaseDetail, KnowledgeBases, Keys, Members, NotVerified, Settings } from "./pages/tenant";
+import { ChannelsPage } from "./features/channels/ChannelsPage";
+import { ConversationDetail, ConversationsPage } from "./features/conversations/ConversationsPage";
+import { InsightsPage } from "./features/insights/InsightsPage";
+import { Dashboard, KnowledgeBaseDetail, KnowledgeBases, Members, NotVerified, Settings } from "./pages/tenant";
 import { Link, match, navigate, useLocation } from "./router";
 
 const PUBLIC = ["/login", "/signup", "/verify-email", "/reset-password", "/forgot-password", "/accept-invite"];
@@ -62,8 +65,10 @@ export function App() {
             <Link to="/">Overview</Link>
             <Link to="/knowledge-bases">Knowledge Bases</Link>
             <Link to="/assistants">Assistants & Playground</Link>
+            {canEdit && <Link to="/channels">Channels & keys</Link>}
+            <Link to="/conversations">Conversations</Link>
+            <Link to="/insights">Insights</Link>
             <Link to="/members">Users</Link>
-            {canEdit && <Link to="/keys">API & Channel keys</Link>}
             <Link to="/settings">Settings</Link>
           </nav>
         )}
@@ -107,6 +112,9 @@ function route(path: string, ctx: { me: Me; canEdit: boolean; refresh: () => Pro
   if (path === "/assistants") return <Assistants canEdit={canEdit} />;
   if (path === "/members") return <Members canEdit={canEdit} myId={me.user.id} />;
   if (path === "/settings") return <Settings canEdit={canEdit} onChange={() => void ctx.refresh()} />;
-  if (path === "/keys" && canEdit) return <Keys />;
+  if ((path === "/channels" || path === "/keys") && canEdit) return <ChannelsPage tenantSlug={me.current_tenant.slug} />;
+  if ((p = match("/conversations/:id", path))) return <ConversationDetail key={p.id} id={p.id!} />;
+  if (path === "/conversations") return <ConversationsPage />;
+  if (path === "/insights") return <InsightsPage canEdit={canEdit} />;
   return <Dashboard canEdit={canEdit} />;
 }

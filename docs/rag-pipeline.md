@@ -96,7 +96,10 @@ immediately with a readable reason and are not retried.
 ## 3. Answering (`services/answering.py`)
 
 **Answer Language** = language detected on the question (short or ambiguous questions fall back to
-the Conversation's last Answer Language, then the Assistant's default language).
+the Conversation's last Answer Language, then the Assistant's default language). A detection counts
+when its confidence is ≥ 0.5, or ≥ 0.35 with a lead of ≥ 0.1 over the runner-up. Short questions
+spread confidence across related languages ("And how do I reset it?": en 0.50, de 0.36), and
+dropping them would answer a Visitor who switched language in the previous turn's language.
 
 ```
 [system]   Assistant.system_prompt

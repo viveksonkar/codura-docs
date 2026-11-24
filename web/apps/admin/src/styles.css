@@ -60,3 +60,21 @@ main { padding: 24px 32px; max-width: 1200px; }
 .chunk pre { white-space: pre-wrap; background: var(--bg); padding: 8px; border-radius: 6px; margin: 4px 0 10px; }
 code.secret { user-select: all; word-break: break-all; }
 .loading { padding: 40px; text-align: center; color: var(--muted); }
+
+/* M2: Channels, Conversations, Insights */
+button.secondary, a.button.secondary { background: var(--panel); color: var(--text); border: 1px solid var(--line); }
+a.button { display: inline-block; padding: 7px 14px; border-radius: 6px; }
+a.button:hover { text-decoration: none; }
+button.danger { background: var(--err); color: #fff; }
+.filters { flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.qr { width: 160px; height: 160px; background: #fff; padding: 6px; border-radius: 8px; border: 1px solid var(--line); }
+.qr svg { width: 100%; height: 100%; display: block; }
+pre.snippet { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; overflow-x: auto; font-size: 12px; white-space: pre; }
+code.secret { user-select: all; word-break: break-all; }
+td.actions { white-space: nowrap; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; }
+table.bars { border: 0; background: none; } table.bars th { width: 30%; text-transform: none; font-size: 13px; color: var(--text); }
+table.bars td { border: 0; } .bar { display: inline-block; height: 10px; border-radius: 5px; background: var(--accent); min-width: 2px; }
+td.num { width: 60px; text-align: right; font-variant-numeric: tabular-nums; }
+.transcript .plain { white-space: pre-wrap; }
+fieldset.theme { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 8px; padding: 10px; }

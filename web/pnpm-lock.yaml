@@ -19,6 +19,9 @@ importers:
       marked:
         specifier: 15.0.4
         version: 15.0.4
+      qrcode-generator:
+        specifier: 1.4.4
+        version: 1.4.4
       react:
         specifier: 18.3.1
         version: 18.3.1
@@ -43,9 +46,35 @@ importers:
         version: 5.4.11
       vitest:
         specifier: 2.1.8
-        version: 2.1.8
+        version: 2.1.8(happy-dom@15.11.7)
 
-  apps/widget: {}
+  apps/widget:
+    dependencies:
+      '@codura/chat-client':
+        specifier: workspace:*
+        version: link:../../packages/chat-client
+      dompurify:
+        specifier: 3.2.3
+        version: 3.2.3
+      marked:
+        specifier: 15.0.4
+        version: 15.0.4
+      preact:
+        specifier: 10.25.4
+        version: 10.25.4
+    devDependencies:
+      happy-dom:
+        specifier: 15.11.7
+        version: 15.11.7
+      typescript:
+        specifier: 5.6.3
+        version: 5.6.3
+      vite:
+        specifier: 5.4.11
+        version: 5.4.11
+      vitest:
+        specifier: 2.1.8
+        version: 2.1.8(happy-dom@15.11.7)
 
   packages/chat-client:
     devDependencies:
@@ -54,7 +83,7 @@ importers:
         version: 5.6.3
       vitest:
         specifier: 2.1.8
-        version: 2.1.8
+        version: 2.1.8(happy-dom@15.11.7)
 
 packages:
 
@@ -544,6 +573,10 @@ packages:
   electron-to-chromium@1.5.490:
     resolution: {integrity: sha512-I0dPyEsiaYAlbGJlr0SdRRGSWk9BpOz8AIo/4f93A6bAGuN3YafmT71rpss72SA05isaAkcAOYcW0F0H48om4Q==}
 
+  entities@4.5.0:
+    resolution: {integrity: sha512-V0hjH4dGPh9Ao5p0MoRY6BVqtwCjhz6vI5LT8AJ55H+4g9/4vbHx1I54fS0XuclLhDHArPQCiMjDxjaL8fPxhw==}
+    engines: {node: '>=0.12'}
+
   es-module-lexer@1.7.0:
     resolution: {integrity: sha512-jEQoCwk8hyb2AZziIOLhDqpm5+2ww5uIE6lkO/6jcOCusfk6LhMHpXXfBLXTZ7Ydyt0j4VoUQv6uGNYbdW+kBA==}
 
@@ -571,6 +604,10 @@ packages:
   gensync@1.0.0-beta.2:
     resolution: {integrity: sha512-3hN7NaskYvMDLQY55gnW3NQ+mesEAepTqlg+VEbj7zzqEMBVNhzcGYYeqFo/TlYz6eQiFcp1HcsCZO+nGgS8zg==}
     engines: {node: '>=6.9.0'}
+
+  happy-dom@15.11.7:
+    resolution: {integrity: sha512-KyrFvnl+J9US63TEzwoiJOQzZBJY7KgBushJA8X61DMbNsH+2ONkDuLDnCnwUiPTF42tLoEmrPyoqbenVA5zrg==}
+    engines: {node: '>=18.0.0'}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -628,6 +665,12 @@ packages:
   postcss@8.5.33:
     resolution: {integrity: sha512-RVHEU9/Pp1Fnjr/MpAJsZoADukCKhfIi15OunEYiGktIkYLkPVvC1sioWolGDS7XByMTx9m/IGbro0Js13zhnQ==}
     engines: {node: ^10 || ^12 || >=14}
+
+  preact@10.25.4:
+    resolution: {integrity: sha512-jLdZDb+Q+odkHJ+MpW/9U5cODzqnB+fy2EiHSZES7ldV5LK7yjlVzTp7R8Xy6W6y75kfK8iWYtFVH7lvjwrCMA==}
+
+  qrcode-generator@1.4.4:
+    resolution: {integrity: sha512-HM7yY8O2ilqhmULxGMpcHSF1EhJJ9yBj8gvDEuZ6M+KGJ0YY2hKpnXvRD+hZPLrDVck3ExIGhmPtSdcjC+guuw==}
 
   react-dom@18.3.1:
     resolution: {integrity: sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==}
@@ -756,6 +799,14 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  webidl-conversions@7.0.0:
+    resolution: {integrity: sha512-VwddBukDzu71offAQR975unBIGqfKZpM+8ZX6ySk8nYhVoo5CYaZyzt3YBvYtRtO+aoGlqxPg/B87NGVZ/fu6g==}
+    engines: {node: '>=12'}
+
+  whatwg-mimetype@3.0.0:
+    resolution: {integrity: sha512-nt+N2dzIutVRxARx1nghPKGv1xHikU7HKdfafKkLNLindmPU/ch3U31NOCGGA/dmPcmb1VlofO0vnKAcsm0o/Q==}
+    engines: {node: '>=12'}
 
   why-is-node-running@2.3.0:
     resolution: {integrity: sha512-hUrmaWBdVDcxvYqnyh09zunKzROWjbZTiNy8dBEjkS7ehEDQibXJ7XvlmtbwuTclUiIyN+CyXQD4Vmko8fNm8w==}
@@ -1179,6 +1230,8 @@ snapshots:
 
   electron-to-chromium@1.5.490: {}
 
+  entities@4.5.0: {}
+
   es-module-lexer@1.7.0: {}
 
   esbuild@0.21.5:
@@ -1220,6 +1273,12 @@ snapshots:
 
   gensync@1.0.0-beta.2: {}
 
+  happy-dom@15.11.7:
+    dependencies:
+      entities: 4.5.0
+      webidl-conversions: 7.0.0
+      whatwg-mimetype: 3.0.0
+
   js-tokens@4.0.0: {}
 
   jsesc@3.1.0: {}
@@ -1259,6 +1318,10 @@ snapshots:
       nanoid: 3.3.20
       picocolors: 1.1.1
       source-map-js: 1.2.3
+
+  preact@10.25.4: {}
+
+  qrcode-generator@1.4.4: {}
 
   react-dom@18.3.1(react@18.3.1):
     dependencies:
@@ -1362,7 +1425,7 @@ snapshots:
     optionalDependencies:
       fsevents: 2.3.3
 
-  vitest@2.1.8:
+  vitest@2.1.8(happy-dom@15.11.7):
     dependencies:
       '@vitest/expect': 2.1.8
       '@vitest/mocker': 2.1.8(vite@5.4.11)
@@ -1384,6 +1447,8 @@ snapshots:
       vite: 5.4.11
       vite-node: 2.1.8
       why-is-node-running: 2.3.0
+    optionalDependencies:
+      happy-dom: 15.11.7
     transitivePeerDependencies:
       - less
       - lightningcss
@@ -1394,6 +1459,10 @@ snapshots:
       - sugarss
       - supports-color
       - terser
+
+  webidl-conversions@7.0.0: {}
+
+  whatwg-mimetype@3.0.0: {}
 
   why-is-node-running@2.3.0:
     dependencies:

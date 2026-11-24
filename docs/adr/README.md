@@ -37,3 +37,4 @@ impact; or breaking a CLAUDE.md invariant.
 | [0022](./0022-self-hosted-telemetry.md) | Self-hosted telemetry: OTel + Prometheus/Grafana, Postgres analytics | Accepted |
 | [0023](./0023-optional-visitor-email.md) | Anonymous Visitors; optional email is contact data, never identity | Accepted |
 | [0024](./0024-qwen3-instruct-and-6gb-vram-settings.md) | Local default `qwen3:4b-instruct-2507`; Ollama tuned for 6 GB GPUs | Accepted |
+| [0025](./0025-retrievable-hosted-channel-keys.md) | Hosted keys stored encrypted; per-key Origin rules and CORS | Accepted |

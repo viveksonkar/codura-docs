@@ -1,0 +1,15 @@
+event: meta
+data: {"conversation_id":"conv_fixture1","message_id":"msg_fixture_a2","user_message_id":"msg_fixture_u2","language":"hi"}
+
+event: delta
+data: {"text":"X200 की वारंटी "}
+
+event: delta
+data: {"text":"24 महीने है [1]।"}
+
+event: citations
+data: {"items":[{"n":1,"document_id":"doc_fixture1","title":"X200 Manual","page":3,"heading_path":["Warranty"],"snippet":"The X200 warranty lasts 24 months from purchase."}]}
+
+event: done
+data: {"finish_reason":"stop","latency_ms":990}
+

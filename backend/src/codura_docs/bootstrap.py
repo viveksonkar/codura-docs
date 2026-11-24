@@ -15,10 +15,13 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Connection
 
 from codura_docs.config import Settings
+from codura_docs.crypto import Keyring
 from codura_docs.db.guards import EMBEDDING_KEY, embedding_fingerprint
 from codura_docs.db.migrate import upgrade_to_head
 from codura_docs.ids import new_id
 from codura_docs.passwords import hash_password
+from codura_docs.services.auth import sha256
+from codura_docs.services.channel_keys import generate, hosted_aad
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +29,10 @@ DEMO_TENANT_SLUG = "demo"
 DEMO_ADMIN_EMAIL = "admin@demo.test"
 DEMO_USER_EMAIL = "user@demo.test"
 DEMO_PASSWORD = "demo-password"  # noqa: S105 - local demo only, never seeded in production
+DEMO_ASSISTANT_SLUG = "help"
+# Fixed, dev-only widget key for the /demo/ page and the web e2e (never seeded in production).
+DEMO_WIDGET_KEY = "pk_demo_widget_local_only_00000000000000000000000"
+DEMO_ORIGINS = ["http://localhost:8080", "http://127.0.0.1:8080", "http://localhost:5174"]
 
 
 def _set_role_passwords(conn: Connection, settings: Settings) -> None:
@@ -117,7 +124,68 @@ def _ensure_user(
     return user_id
 
 
-def _seed_demo_tenant(conn: Connection) -> None:
+def _seed_demo_assistant(conn: Connection, settings: Settings, tenant_id: str) -> None:
+    """Demo Knowledge Base + Assistant 'help' with the Hosted Chat Page at /c/demo/help (M2-06)."""
+    if conn.execute(
+        text("SELECT 1 FROM assistants WHERE tenant_id = :t AND slug = :s"),
+        {"t": tenant_id, "s": DEMO_ASSISTANT_SLUG},
+    ).first():
+        return
+    kb_id, asst_id = new_id("kb"), new_id("asst")
+    conn.execute(
+        text(
+            "INSERT INTO knowledge_bases (id, tenant_id, name, description) "
+            "VALUES (:id, :t, 'Demo documents', 'Upload documents here to try the demo chat')"
+        ),
+        {"id": kb_id, "t": tenant_id},
+    )
+    welcome = {
+        "default": "Hi! Ask me anything about the demo documents.",
+        "hi": "नमस्ते! डेमो दस्तावेज़ों के बारे में कुछ भी पूछिए।",
+        "es": "¡Hola! Pregúntame lo que quieras sobre los documentos de demostración.",
+    }
+    conn.execute(
+        text(
+            "INSERT INTO assistants (id, tenant_id, slug, name, knowledge_base_ids, welcome_text, "
+            "theme, visitor_email, hosted_enabled) VALUES (:id, :t, :s, 'Demo Help', ARRAY[:kb], "
+            "CAST(:w AS jsonb), CAST(:th AS jsonb), 'optional', true)"
+        ),
+        {
+            "id": asst_id,
+            "t": tenant_id,
+            "s": DEMO_ASSISTANT_SLUG,
+            "kb": kb_id,
+            "w": json.dumps(welcome),
+            "th": json.dumps({"title": "Demo Help", "accent": "#2563eb"}),
+        },
+    )
+    hosted = generate("channel")
+    encrypted = Keyring.from_settings(settings).encrypt(hosted, aad=hosted_aad(tenant_id))
+    for plaintext, channel, origins, enc, name in (
+        (hosted, "hosted", [], encrypted, "Hosted Chat Page"),
+        (DEMO_WIDGET_KEY, "widget", DEMO_ORIGINS, None, "Demo widget (dev only)"),
+    ):
+        conn.execute(
+            text(
+                "INSERT INTO api_keys (id, tenant_id, kind, prefix, key_hash, name, channel, "
+                "assistant_id, allowed_origins, public_key_enc) VALUES (:id, :t, 'channel', :p, "
+                ":h, :n, :c, :a, :o, :e) ON CONFLICT (key_hash) DO NOTHING"
+            ),
+            {
+                "id": new_id("key"),
+                "t": tenant_id,
+                "p": plaintext[:10],
+                "h": sha256(plaintext),
+                "n": name,
+                "c": channel,
+                "a": asst_id,
+                "o": origins,
+                "e": enc,
+            },
+        )
+
+
+def _seed_demo_tenant(conn: Connection, settings: Settings) -> None:
     tenant_id = conn.execute(
         text("SELECT id FROM tenants WHERE slug = :s"), {"s": DEMO_TENANT_SLUG}
     ).scalar()
@@ -144,6 +212,7 @@ def _seed_demo_tenant(conn: Connection) -> None:
             ),
             {"t": tenant_id, "u": user_id, "r": role},
         )
+    _seed_demo_assistant(conn, settings, str(tenant_id))
 
 
 def run_bootstrap(settings: Settings) -> None:
@@ -163,7 +232,7 @@ def run_bootstrap(settings: Settings) -> None:
                 name="Platform Admin",
             )
             if settings.seed_demo_tenant and settings.app_env != "production":
-                _seed_demo_tenant(conn)
+                _seed_demo_tenant(conn, settings)
     finally:
         engine.dispose()
     log.info("bootstrap complete", extra={"seed_demo_tenant": settings.seed_demo_tenant})

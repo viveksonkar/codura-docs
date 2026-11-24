@@ -1,87 +1,54 @@
 """Public Chat API v1 (specs/api.md §3, ADR-0012). The Channel Key alone decides Tenant + Assistant.
 
-M2 adds full Origin/CORS hardening and rate limits; M1 enforces key type, revocation, Tenant status,
-Allowed Origins when configured, and returns 404 (never 403) for other Tenants' ids (SEC-15).
+Auth, Origin and per-IP limits: `api/auth/public.py`. Chat adds per-key, per-Tenant and
+per-Visitor buckets and concurrency caps so one Tenant can't starve the shared LLM (SEC-06).
+Other Tenants' ids return 404, never 403 (SEC-15).
 """
 
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from starlette.responses import StreamingResponse
 
+from codura_docs.api.auth.public import CHANNEL, ChannelAccess, limit
 from codura_docs.api.errors import ApiError
 from codura_docs.api.routers.admin.content import replay_from
 from codura_docs.api.sse import sse_response
-from codura_docs.db.session import global_session, rowcount, tenant_session
+from codura_docs.config import Settings
+from codura_docs.db.session import rowcount, tenant_session
 from codura_docs.domain.language import localized
+from codura_docs.ratelimit import release_after
 from codura_docs.services import answering
 from codura_docs.services import assistants as assistants_svc
 from codura_docs.services.auth import sha256
-from codura_docs.services.channel_keys import resolve_key
-from codura_docs.tenancy import TenantContext
 
 router = APIRouter(prefix="/api/v1", tags=["public"])
-_VISITOR = re.compile(r"^[A-Za-z0-9-]{8,64}$")
-_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_EMAIL = re.compile(r"^[^@\s]{1,64}@[^@\s]+\.[^@\s]{2,}$")
+UI_LANGUAGES = ["en", "hi", "es", "fr", "de", "ar", "zh"]
 
 
-@dataclass(frozen=True)
-class ChannelAccess:
-    ctx: TenantContext
-    assistant_id: str
-    key_id: str
-    channel: str
-    visitor_id: str
+def _ui_lang(request: Request) -> str:
+    return (request.headers.get("accept-language") or "en")[:2].lower()
 
 
-async def channel_access(request: Request) -> ChannelAccess:
-    auth = request.headers.get("authorization", "")
-    token = auth[7:].strip() if auth.lower().startswith("bearer ") else ""
-    if not token.startswith("pk_"):
-        raise ApiError(401, "unauthenticated", "A Channel Key (pk_…) is required")
-    async with global_session(request.app.state.engine) as s:
-        key = await resolve_key(s, token)
-    if (
-        key is None
-        or key.kind != "channel"
-        or key.revoked
-        or key.tenant_status != "active"
-        or not key.assistant_id
-    ):
-        raise ApiError(401, "unauthenticated", "Invalid or revoked Channel Key")
-    origin = request.headers.get("origin")
-    if (
-        key.channel in ("widget", "wordpress")
-        and key.allowed_origins
-        and origin not in key.allowed_origins
-    ):
-        raise ApiError(403, "origin_not_allowed", "This site is not allowed to use this key")
-    visitor = request.headers.get("x-codura-visitor", "")
-    if not _VISITOR.match(visitor):
-        raise ApiError(
-            422, "validation_error", "X-Codura-Visitor header (client-generated id) is required"
-        )
-    return ChannelAccess(
-        TenantContext(key.tenant_id), key.assistant_id, key.key_id, key.channel or "api", visitor
-    )
-
-
-CHANNEL = Depends(channel_access)
-
-
-@router.get("/channel/config")
-async def channel_config(request: Request, c: ChannelAccess = CHANNEL) -> dict[str, Any]:
-    lang = (request.headers.get("accept-language") or "en")[:2].lower()
+async def _assistant(request: Request, c: ChannelAccess) -> dict[str, Any]:
     async with tenant_session(request.app.state.engine, c.ctx) as s:
         a = await assistants_svc.get(s, c.assistant_id)
     if a is None:
         raise ApiError(404, "not_found", "Assistant not found")
+    return a
+
+
+@router.get("/channel/config")
+async def channel_config(request: Request, c: ChannelAccess = CHANNEL) -> dict[str, Any]:
+    settings: Settings = request.app.state.settings
+    lang = _ui_lang(request)
+    a = await _assistant(request, c)
     return {
         "assistant": {
             "id": a["id"],
@@ -90,20 +57,20 @@ async def channel_config(request: Request, c: ChannelAccess = CHANNEL) -> dict[s
             "welcome_text": localized(a["welcome_text"], lang, "Hi! How can I help?"),
         },
         "theme": a["theme"] or {},
-        "ui_languages": ["en", "hi", "es", "fr", "de", "ar", "zh"],
+        "ui_languages": UI_LANGUAGES,
         "features": {"feedback": True, "citations": True},
         "visitor_email": {
             "mode": a["visitor_email"],
             "consent_text": localized(a["visitor_email_consent"], lang, ""),
             "privacy_url": a["privacy_url"],
         },
-        "branding": True,
-        "limits": {"max_question_chars": 2000},
+        "branding": True,  # "Powered by Codura" until M3 Plans add `remove_branding` (FR-55)
+        "limits": {"max_question_chars": settings.chat_max_question_chars},
     }
 
 
 class ChatIn(BaseModel):
-    question: str = Field(min_length=1, max_length=2000)
+    question: str = Field(min_length=1, max_length=8000)
     conversation_id: str | None = Field(default=None, max_length=64)
     visitor_email: str | None = Field(default=None, max_length=254)
     consent: bool | None = None
@@ -113,37 +80,77 @@ class ChatIn(BaseModel):
 async def chat_stream(
     body: ChatIn, request: Request, c: ChannelAccess = CHANNEL
 ) -> StreamingResponse:
-    email_enc = email_hash = None
-    if body.visitor_email and not body.conversation_id:
-        email = body.visitor_email.strip().lower()
-        if not _EMAIL.match(email) or not body.consent:
-            raise ApiError(422, "validation_error", "A valid email and consent are required")
-        email_enc = request.app.state.keyring.encrypt(
-            email, aad=f"visitor_email:{c.ctx.tenant_id}".encode()
+    settings: Settings = request.app.state.settings
+    question = body.question.strip()
+    if not question or len(question) > settings.chat_max_question_chars:
+        raise ApiError(
+            422,
+            "validation_error",
+            f"Questions must be 1–{settings.chat_max_question_chars} characters",
         )
-        email_hash = sha256(f"{c.ctx.tenant_id}:{email}")
-    req = answering.AnswerRequest(
-        ctx=c.ctx,
-        assistant_id=c.assistant_id,
-        question=body.question.strip(),
-        channel=c.channel,
-        conversation_id=body.conversation_id,
-        visitor_id=c.visitor_id,
-        channel_key_id=c.key_id,
-        visitor_email_enc=email_enc,
-        visitor_email_hash=email_hash,
+    limiter = request.app.state.rate_limiter
+    limit(limiter, f"key:{c.key_id}", settings.chat_rate_per_key_per_min)
+    limit(limiter, f"tenant:{c.ctx.tenant_id}", settings.chat_rate_per_tenant_per_min)
+    limit(
+        limiter,
+        f"visitor:{c.key_id}:{c.client_ip}:{c.visitor_id}",
+        settings.chat_rate_per_visitor_per_min,
     )
-    events = answering.answer(
-        req,
-        engine=request.app.state.engine,
-        registry=request.app.state.registry,
-        keyring=request.app.state.keyring,
-    )
+
+    email_enc = email_hash = None
+    if not body.conversation_id:
+        mode = (await _assistant(request, c))["visitor_email"]
+        email = (body.visitor_email or "").strip().lower()
+        if mode == "required" and not email:
+            raise ApiError(422, "visitor_email_required", "Please enter your email to start")
+        if email and mode != "off":  # ADR-0023: contact data only, never identity
+            if not _EMAIL.match(email):
+                raise ApiError(422, "validation_error", "Please enter a valid email address")
+            if not body.consent:
+                raise ApiError(422, "consent_required", "Please accept the consent text")
+            email_enc = request.app.state.keyring.encrypt(
+                email, aad=f"visitor_email:{c.ctx.tenant_id}".encode()
+            )
+            email_hash = sha256(f"{c.ctx.tenant_id}:{email}")
+
+    slots = [
+        (f"key:{c.key_id}", settings.chat_max_concurrent_per_key),
+        (f"tenant:{c.ctx.tenant_id}", settings.chat_max_concurrent_per_tenant),
+    ]
+    concurrency = request.app.state.concurrency
+    if not concurrency.acquire(slots):
+        raise ApiError(
+            429,
+            "rate_limited",
+            "This assistant is busy. Please try again in a moment.",
+            headers={"Retry-After": "2"},
+        )
     try:
+        req = answering.AnswerRequest(
+            ctx=c.ctx,
+            assistant_id=c.assistant_id,
+            question=question,
+            channel=c.channel,
+            conversation_id=body.conversation_id,
+            visitor_id=c.visitor_id,
+            channel_key_id=c.key_id,
+            visitor_email_enc=email_enc,
+            visitor_email_hash=email_hash,
+        )
+        events = answering.answer(
+            req,
+            engine=request.app.state.engine,
+            registry=request.app.state.registry,
+            keyring=request.app.state.keyring,
+        )
         first = await anext(events)
     except (answering.AssistantNotFound, answering.ConversationNotFound) as exc:
+        concurrency.release(slots)
         raise ApiError(404, "not_found", "Conversation not found") from exc
-    return sse_response(replay_from(first, events))
+    except BaseException:
+        concurrency.release(slots)
+        raise
+    return sse_response(release_after(replay_from(first, events), concurrency, slots))
 
 
 @router.get("/conversations/{conversation_id}/messages")
@@ -166,8 +173,8 @@ async def history(
             (
                 await s.execute(
                     text(
-                        "SELECT id, role, content, language, citations, feedback, created_at "
-                        "FROM messages WHERE conversation_id = :id ORDER BY created_at"
+                        "SELECT id, role, content, language, citations, feedback, finish_reason, "
+                        "created_at FROM messages WHERE conversation_id = :id ORDER BY created_at"
                     ),
                     {"id": conversation_id},
                 )

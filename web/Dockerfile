@@ -6,7 +6,6 @@ WORKDIR /web
 COPY web/package.json web/pnpm-workspace.yaml web/pnpm-lock.yaml web/tsconfig.base.json ./
 COPY web/packages ./packages
 COPY web/apps ./apps
-COPY web/scripts ./scripts
 RUN pnpm install --frozen-lockfile && pnpm -r build
 
 FROM nginx:1.27.3-alpine AS runtime

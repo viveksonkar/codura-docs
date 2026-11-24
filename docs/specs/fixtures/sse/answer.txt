@@ -1,0 +1,20 @@
+event: meta
+data: {"conversation_id":"conv_fixture1","message_id":"msg_fixture_a1","user_message_id":"msg_fixture_u1","language":"en"}
+
+: ping
+
+event: delta
+data: {"text":"The X200 warranty lasts "}
+
+event: delta
+data: {"text":"**24 months** [1]."}
+
+event: future_event
+data: {"ignored":true}
+
+event: citations
+data: {"items":[{"n":1,"document_id":"doc_fixture1","title":"X200 Manual","page":3,"heading_path":["Warranty"],"snippet":"The X200 warranty lasts 24 months from purchase."}]}
+
+event: done
+data: {"finish_reason":"stop","latency_ms":812}
+

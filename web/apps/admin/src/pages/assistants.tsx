@@ -8,7 +8,8 @@ interface Assistant {
   id: string; name: string; slug: string; knowledge_base_ids: string[]; system_prompt: string;
   default_language: string; welcome_text: Record<string, string>; fallback_text: Record<string, string>;
   limit_reached_text: Record<string, string>; retrieval: Record<string, number>; hosted_enabled: boolean;
-  visitor_email: string;
+  visitor_email: string; visitor_email_consent: Record<string, string>; privacy_url: string | null;
+  theme: { title?: string; accent?: string; position?: "left" | "right"; logo_url?: string | null };
 }
 
 export function Assistants({ canEdit }: { canEdit: boolean }) {
@@ -95,17 +96,31 @@ export function AssistantDetail({ id, canEdit }: { id: string; canEdit: boolean 
             <PerLanguage label="Limit reached" disabled={!canEdit} value={form.limit_reached_text} onChange={(v) => set("limit_reached_text", v)} />
             <label>Visitor email<select value={form.visitor_email} onChange={(e) => set("visitor_email", e.target.value)}>
               <option value="off">Off</option><option value="optional">Optional</option><option value="required">Required</option></select></label>
+            {form.visitor_email !== "off" && <>
+              <PerLanguage label="Consent text shown next to the email field" disabled={!canEdit} value={form.visitor_email_consent ?? {}} onChange={(v) => set("visitor_email_consent", v)} />
+              <label>Privacy policy URL<input type="url" placeholder="https://www.example.com/privacy" value={form.privacy_url ?? ""}
+                onChange={(e) => set("privacy_url", e.target.value || null)} /></label>
+            </>}
+            <fieldset className="theme">
+              <legend>Chat appearance (Widget and Hosted page)</legend>
+              <label>Title<input value={form.theme?.title ?? ""} placeholder={form.name} onChange={(e) => set("theme", { ...form.theme, title: e.target.value })} /></label>
+              <label>Accent colour<input type="color" value={form.theme?.accent ?? "#2563eb"} onChange={(e) => set("theme", { ...form.theme, accent: e.target.value })} /></label>
+              <label>Launcher position<select value={form.theme?.position ?? "right"} onChange={(e) => set("theme", { ...form.theme, position: e.target.value as "left" | "right" })}>
+                <option value="right">Right</option><option value="left">Left</option></select></label>
+              <label>Logo URL (https)<input type="url" value={form.theme?.logo_url ?? ""} onChange={(e) => set("theme", { ...form.theme, logo_url: e.target.value || null })} /></label>
+            </fieldset>
             <label>Relevance threshold (0–1, lower = more permissive)
               <input type="number" step="0.05" min="0" max="1" value={form.retrieval.min_score ?? 0.45}
                 onChange={(e) => set("retrieval", { ...form.retrieval, min_score: Number(e.target.value) })} /></label>
-            <label className="check"><input type="checkbox" checked={form.hosted_enabled} onChange={(e) => set("hosted_enabled", e.target.checked)} />Enable hosted chat page (web channel, M2)</label>
+            <label className="check"><input type="checkbox" checked={form.hosted_enabled} onChange={(e) => set("hosted_enabled", e.target.checked)} />Enable the Hosted Chat Page (link and QR code on the <Link to="/channels">Channels</Link> page)</label>
           </fieldset>
           {msg && <Alert kind={msg.kind}>{msg.text}</Alert>}
           {canEdit && <button onClick={async () => {
             try {
               const clean = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v.trim()));
               setForm(await patch<Assistant>(`/api/admin/assistants/${id}`, {
-                ...form, welcome_text: clean(form.welcome_text), fallback_text: clean(form.fallback_text), limit_reached_text: clean(form.limit_reached_text) }));
+                ...form, welcome_text: clean(form.welcome_text), fallback_text: clean(form.fallback_text), limit_reached_text: clean(form.limit_reached_text),
+                visitor_email_consent: clean(form.visitor_email_consent ?? {}) }));
               setMsg({ kind: "ok", text: "Saved" });
             } catch (e) { setMsg({ kind: "error", text: errorText(e) }); }
           }}>Save</button>}

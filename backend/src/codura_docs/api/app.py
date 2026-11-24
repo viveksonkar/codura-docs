@@ -92,12 +92,25 @@ def create_app(
     app.state.engine = engine
     app.state.readiness = Readiness()
     install_error_handlers(app)
+    from codura_docs.api.cors import PublicCorsMiddleware
+    from codura_docs.ratelimit import InMemoryConcurrencyLimiter, InMemoryRateLimiter
+
+    app.state.rate_limiter = InMemoryRateLimiter()
+    app.state.concurrency = InMemoryConcurrencyLimiter()
+    app.add_middleware(PublicCorsMiddleware)
     app.add_middleware(MetricsMiddleware)
     app.add_middleware(RequestIdMiddleware)
     from codura_docs.api.routers.admin import auth as auth_routes
-    from codura_docs.api.routers.admin import content, tenant
+    from codura_docs.api.routers.admin import (
+        channel_keys,
+        content,
+        conversations,
+        insights,
+        tenant,
+        visitor_emails,
+    )
     from codura_docs.api.routers.platform import routes as platform_routes
-    from codura_docs.api.routers.public import chat
+    from codura_docs.api.routers.public import chat, hosted
     from codura_docs.crypto import Keyring
     from codura_docs.db.engine import make_engine as _make_engine
 
@@ -109,8 +122,13 @@ def create_app(
         auth_routes.public,
         tenant.router,
         content.router,
+        channel_keys.router,
+        conversations.router,
+        visitor_emails.router,
+        insights.router,
         platform_routes.router,
         chat.router,
+        hosted.router,
     ):
         app.include_router(r)
     if settings.app_env != "production":

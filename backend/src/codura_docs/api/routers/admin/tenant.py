@@ -1,4 +1,4 @@
-"""Tenant settings, members, usage and Channel/Secret keys (FR-31, FR-37/50/51, FR-34)."""
+"""Tenant settings, members and usage (FR-31, FR-37/50/51). Keys: `channel_keys.py`."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from codura_docs.api.errors import ApiError
 from codura_docs.db.session import tenant_session
 from codura_docs.domain.language import ocr_languages_valid
 from codura_docs.ports.language import SUPPORTED_LANGUAGES
-from codura_docs.services import channel_keys, members
+from codura_docs.services import members
 
 router = APIRouter(prefix="/api/admin", tags=["tenant"])
 READ = Depends(require_tenant("user"))
@@ -163,47 +163,3 @@ async def remove_member(user_id: str, request: Request, a: TenantAccess = ADMIN)
                 raise ApiError(404, "not_found", "Member not found")
     except members.MemberError as exc:
         raise ApiError(409, exc.code, str(exc)) from exc
-
-
-# --- Keys (M2-00 completes management; available now for the Playground/public API) -----------------
-
-
-class KeyIn(BaseModel):
-    kind: Literal["channel", "secret"] = "channel"
-    name: str = Field(default="", max_length=80)
-    channel: Literal["hosted", "widget", "wordpress", "android", "api"] | None = "widget"
-    assistant_id: str | None = None
-    allowed_origins: list[str] = Field(default_factory=list, max_length=20)
-
-
-@router.get("/channel-keys")
-async def list_keys(request: Request, a: TenantAccess = ADMIN) -> dict[str, Any]:
-    async with tenant_session(request.app.state.engine, a.ctx) as s:
-        return {"items": await channel_keys.list_keys(s)}
-
-
-@router.post("/channel-keys", status_code=201)
-async def create_key(
-    body: KeyIn, request: Request, a: TenantAccess = ADMIN_ACTIVE
-) -> dict[str, Any]:
-    try:
-        async with tenant_session(request.app.state.engine, a.ctx) as s:
-            key_id, plaintext = await channel_keys.create_key(
-                s,
-                a.tenant_id,
-                kind=body.kind,
-                name=body.name,
-                channel=body.channel if body.kind == "channel" else None,
-                assistant_id=body.assistant_id if body.kind == "channel" else None,
-                allowed_origins=body.allowed_origins,
-            )
-    except ValueError as exc:
-        raise ApiError(422, "validation_error", str(exc)) from exc
-    return {"id": key_id, "key": plaintext, "note": "Copy this key now: it is shown only once."}
-
-
-@router.post("/channel-keys/{key_id}/revoke", status_code=204)
-async def revoke_key(key_id: str, request: Request, a: TenantAccess = ADMIN) -> None:
-    async with tenant_session(request.app.state.engine, a.ctx) as s:
-        if not await channel_keys.revoke_key(s, key_id):
-            raise ApiError(404, "not_found", "Key not found")

@@ -1,0 +1,9 @@
+event: meta
+data: {"conversation_id":"conv_fixture1","message_id":"msg_fixture_a4","user_message_id":"msg_fixture_u4","language":"en"}
+
+event: delta
+data: {"text":"The X200"}
+
+event: error
+data: {"code":"provider_unavailable","message":"The assistant is temporarily unavailable. Please try again."}
+

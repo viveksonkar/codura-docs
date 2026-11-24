@@ -1,11 +1,23 @@
 {
   "name": "@codura/widget",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node ../../scripts/placeholder-build.mjs",
-    "typecheck": "node -e \"\"",
-    "test": "node -e \"\""
+    "build": "tsc -p tsconfig.json --noEmit && vite build && vite build --mode hosted && node scripts/size-budget.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@codura/chat-client": "workspace:*",
+    "dompurify": "3.2.3",
+    "marked": "15.0.4",
+    "preact": "10.25.4"
+  },
+  "devDependencies": {
+    "happy-dom": "15.11.7",
+    "typescript": "5.6.3",
+    "vite": "5.4.11",
+    "vitest": "2.1.8"
   }
 }
