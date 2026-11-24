@@ -1,0 +1,77 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.0-pg16
+        env:
+          POSTGRES_USER: codura_owner
+          POSTGRES_PASSWORD: codura
+          POSTGRES_DB: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U codura_owner" --health-interval 5s --health-timeout 5s --health-retries 20
+      mailpit:
+        image: axllent/mailpit:v1.21.8
+        ports: ["1025:1025"]
+    env:
+      CODURA_TEST_PG_ADMIN_URL: postgresql+psycopg://codura_owner:codura@localhost:5432/postgres
+      CODURA_TEST_SMTP_HOST: localhost
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+        with:
+          version: "0.5.11"
+      - run: uv sync --frozen
+      - name: ruff
+        run: uv run ruff check . && uv run ruff format --check .
+      - name: mypy (strict)
+        run: uv run mypy src
+      - name: import boundaries (CLAUDE.md invariants)
+        run: uv run lint-imports
+      - name: tests (unit, contract[fake, smtp], integration incl. isolation)
+        run: uv run pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.18.1
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -r typecheck
+      - run: pnpm -r test
+      - run: pnpm -r build
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - name: compose config (CPU variant; CI has no GPU)
+        run: COMPOSE_FILE=docker-compose.yml docker compose config --quiet
+      - name: build images
+        run: COMPOSE_FILE=docker-compose.yml docker compose build migrate web

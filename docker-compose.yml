@@ -1,0 +1,166 @@
+# Codura Docs — full local stack and production base (ADR-0013, deployment.md).
+#   cp .env.example .env && docker compose up -d
+# GPU is enabled through COMPOSE_FILE in .env (compose.gpu.yml). Profiles: observability (M6), wp (M4).
+
+name: codura-docs
+
+x-backend: &backend
+  image: codura-docs-backend:${CODURA_VERSION:-dev}
+  build:
+    context: .
+    dockerfile: backend/Dockerfile
+    args:
+      OCR_LANG_PACKS: ${OCR_LANG_PACKS:-eng hin spa fra deu ara chi-sim}
+  environment: &backend-env
+    APP_ENV: ${APP_ENV:-local}
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+    PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8080}
+    DATABASE_OWNER_URL: postgresql+psycopg://${POSTGRES_USER:-codura_owner}:${POSTGRES_PASSWORD:-codura}@postgres:5432/${POSTGRES_DB:-codura_docs}
+    DATABASE_APP_URL: postgresql+psycopg://codura_app:${DB_APP_PASSWORD:-codura_app}@postgres:5432/${POSTGRES_DB:-codura_docs}
+    DATABASE_WORKER_URL: postgresql+psycopg://codura_worker:${DB_WORKER_PASSWORD:-codura_worker}@postgres:5432/${POSTGRES_DB:-codura_docs}
+    DATABASE_PLATFORM_URL: postgresql+psycopg://codura_platform:${DB_PLATFORM_PASSWORD:-codura_platform}@postgres:5432/${POSTGRES_DB:-codura_docs}
+    DB_APP_PASSWORD: ${DB_APP_PASSWORD:-codura_app}
+    DB_WORKER_PASSWORD: ${DB_WORKER_PASSWORD:-codura_worker}
+    DB_PLATFORM_PASSWORD: ${DB_PLATFORM_PASSWORD:-codura_platform}
+    SESSION_SECRET: ${SESSION_SECRET:-dev-only-change-me}
+    SECRETS_MASTER_KEY: ${SECRETS_MASTER_KEY:-Y29kdXJhLWRldi1vbmx5LWtleS1jaGFuZ2UtbWUhISE=}
+    SECRETS_KEY_VERSION: ${SECRETS_KEY_VERSION:-1}
+    SECRETS_PREVIOUS_KEYS: ${SECRETS_PREVIOUS_KEYS:-}
+    BOOTSTRAP_PLATFORM_ADMIN_EMAIL: ${BOOTSTRAP_PLATFORM_ADMIN_EMAIL:-platform@local.test}
+    BOOTSTRAP_PLATFORM_ADMIN_PASSWORD: ${BOOTSTRAP_PLATFORM_ADMIN_PASSWORD:-admin}
+    SEED_DEMO_TENANT: ${SEED_DEMO_TENANT:-true}
+    OLLAMA_BASE_URL: http://ollama:11434
+    BLOB_STORE: ${BLOB_STORE:-local}
+    S3_ENDPOINT: ${S3_ENDPOINT:-}
+    S3_BUCKET: ${S3_BUCKET:-}
+    S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+    S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+    S3_REGION: ${S3_REGION:-us-east-1}
+    EMAIL_BACKEND: ${EMAIL_BACKEND:-smtp}
+    SMTP_HOST: ${SMTP_HOST:-mailpit}
+    SMTP_PORT: ${SMTP_PORT:-1025}
+    SMTP_USER: ${SMTP_USER:-}
+    SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+    SMTP_STARTTLS: ${SMTP_STARTTLS:-false}
+    MAIL_FROM: ${MAIL_FROM:-no-reply@codura.local}
+    MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
+    MAX_PAGES: ${MAX_PAGES:-500}
+    WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.0-pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-codura_owner}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-codura}
+      POSTGRES_DB: ${POSTGRES_DB:-codura_docs}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.12.6
+    environment:
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-2}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30m}
+      # Each parallel slot multiplies the KV cache: keep 1 on a 6 GB GPU so chat + embedding
+      # models both stay resident (ADR-0018). Raise on bigger GPUs.
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
+      OLLAMA_FLASH_ATTENTION: ${OLLAMA_FLASH_ATTENTION:-1}
+      OLLAMA_KV_CACHE_TYPE: ${OLLAMA_KV_CACHE_TYPE:-q8_0}
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  ollama-init:
+    image: ollama/ollama:0.12.6
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_PULL_MODELS: ${OLLAMA_PULL_MODELS:-bge-m3,qwen3:4b-instruct-2507-q4_K_M}
+    volumes:
+      - ./deploy/ollama/pull-models.sh:/pull-models.sh:ro
+    entrypoint: ["/bin/sh", "/pull-models.sh"]
+    restart: "no"
+
+  migrate:
+    <<: *backend
+    command: ["codura-docs", "migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  api:
+    <<: *backend
+    command: ["codura-docs", "serve"]
+    volumes:
+      - blobs:/data/blobs
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      ollama-init:
+        condition: service_completed_successfully
+
+  worker:
+    <<: *backend
+    command: ["codura-docs", "worker"]
+    volumes:
+      - blobs:/data/blobs
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      ollama-init:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+
+  web:
+    image: codura-docs-web:${CODURA_VERSION:-dev}
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.8.4-alpine
+    ports:
+      - "${HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.21.8
+    ports:
+      - "127.0.0.1:8025:8025"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  ollama:
+  blobs:
+  caddy_data:

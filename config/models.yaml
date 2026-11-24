@@ -1,0 +1,51 @@
+# Model seed file (specs/ports.md §7). Loaded into the platform-managed `model_profiles` table on
+# first boot; afterwards the Platform Console is authoritative (ADR-0019). Tenants never see this.
+#
+# Licence allowlist (ADR-0018): self-hosted models must be apache-2.0 or mit. Remote commercial
+# APIs use `commercial-api`. Prices are COGS inputs in USD per 1M tokens (self-hosted: amortised
+# GPU cost; set real values in the Platform Console from current provider price pages).
+
+default_profile: local-default
+
+chat_profiles:
+  # Non-thinking Qwen3 4B Instruct 2507 (Apache-2.0). Fits a 6 GB GPU next to bge-m3 with a 4k
+  # context. Measured on GTX 1060 6 GB: no reasoning tokens, ~1-4 s per short answer (ADR-0018).
+  # NOTE: the plain `qwen3:4b` tag is the Thinking-2507 model and always reasons first.
+  local-default:
+    provider: ollama
+    model: "qwen3:4b-instruct-2507-q4_K_M"
+    license: apache-2.0
+    disable_thinking: true   # harmless for instruct models; strips any stray <think> output
+    temperature: 0.2
+    max_output_tokens: 700
+    extra: { num_ctx: 4096 }
+
+  # Better quality, slower on 6 GB VRAM (partial CPU offload). Pull first: ollama pull qwen2.5:7b
+  local-quality:
+    provider: ollama
+    model: "qwen2.5:7b"
+    license: apache-2.0
+    temperature: 0.2
+    max_output_tokens: 700
+    extra: { num_ctx: 4096 }
+
+  # Production examples (enabled from the Platform Console with encrypted credentials):
+  # open-std:
+  #   provider: openai_compat          # vLLM / hosted open-weight inference
+  #   base_url: http://vllm:8000/v1
+  #   model: Qwen/Qwen3-14B
+  #   license: apache-2.0
+  # premium:
+  #   provider: anthropic
+  #   model: <current model id>
+  #   license: commercial-api
+  #   api_key_env: ANTHROPIC_API_KEY
+
+# Fixed for the installation, never change (ADR-0015). Startup refuses a mismatch.
+embedding:
+  provider: ollama
+  model: bge-m3
+  dimension: 1024
+
+ocr:
+  engine: tesseract
