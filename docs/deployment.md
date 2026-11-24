@@ -59,9 +59,9 @@ Every long-running service has a healthcheck; `api` uses `/readyz`.
 | `SECRETS_MASTER_KEY` | dev value | AES-256 key (base64) for credentials and Visitor emails; refused default in production (SEC-17) |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `MAIL_FROM` | `mailpit` / `1025` / – / – / `no-reply@codura.local` | `EmailSender` (ADR-0020) |
 | `SIGNUP_ENABLED` | `true` | Self-service signup |
-| `TRIAL_ANSWERS` / `TRIAL_PAGES` / `TRIAL_OCR_PAGES` / `TRIAL_DAYS` | `100` / `200` / `50` / `14` | Fixed trial limits until Plans (M3) |
-| `PAYMENT_PROVIDER` | `manual` | `manual` / `stripe` / `razorpay` (M3); `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` only when `stripe` |
-| `BILLING_CURRENCY` | `USD` | Q10 |
+| `PAYMENT_PROVIDER` | `manual` | `manual` (no network) / `stripe`. Plans, quotas and the Trial live in the database (specs/billing.md); `TRIAL_*` variables were removed in M3 |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | empty | Required for `stripe`. Webhook URL `${PUBLIC_BASE_URL}/api/webhooks/payments/stripe` with `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed` |
+| `BILLING_SCHEDULER_ENABLED` | `true` | Worker enqueues rollups, snapshots and the billing cycle (specs/billing.md §7) |
 | `MODEL_CONFIG_FILE` | `/app/config/models.yaml` | Model Profiles (switchable), fixed embedding, OCR ([architecture.md](./architecture.md) §4) |
 | `OCR_LANG_PACKS` (build arg) | `eng hin spa fra deu ara chi_sim` | Tesseract packs baked into the image (ADR-0016); adjust per Q3 |
 | `OCR_DEFAULT_LANGUAGES` | `eng` | Default `ocr_languages` for new Tenants |

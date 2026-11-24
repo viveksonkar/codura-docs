@@ -20,6 +20,7 @@ class JobContext:
     job: Job
     app_engine: AsyncEngine
     registry: Registry
+    billing_engine: AsyncEngine | None = None  # codura_worker role: billing writes (ADR-0026)
 
 
 Handler = Callable[[JobContext], Awaitable[None]]

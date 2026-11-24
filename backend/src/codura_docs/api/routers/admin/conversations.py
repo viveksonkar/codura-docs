@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
@@ -16,6 +16,7 @@ from sqlalchemy import text
 
 from codura_docs.api.deps import TenantAccess, require_tenant
 from codura_docs.api.errors import ApiError
+from codura_docs.billing.entitlements import for_tenant
 from codura_docs.db.session import tenant_session
 
 router = APIRouter(prefix="/api/admin", tags=["conversations"])
@@ -104,10 +105,12 @@ async def list_conversations(
                (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id AND m.feedback = -1) AS thumbs_down,
                (SELECT count(*) FROM messages m WHERE m.conversation_id = c.id AND m.outcome = 'fallback') AS fallbacks
         FROM conversations c JOIN assistants a ON a.id = c.assistant_id
-        WHERE {" AND ".join(where)}
+        WHERE {" AND ".join(where)} AND c.last_message_at >= :retention_from
         ORDER BY c.last_message_at DESC, c.id DESC
         LIMIT :limit"""
     async with tenant_session(request.app.state.engine, a.ctx) as s:
+        retention = int((await for_tenant(s, a.tenant_id)).get("analytics_retention_days"))
+        params["retention_from"] = datetime.now(UTC) - timedelta(days=retention)
         rows = [dict(r) for r in (await s.execute(text(sql), params)).mappings().all()]
     next_cursor = None
     if len(rows) > limit:

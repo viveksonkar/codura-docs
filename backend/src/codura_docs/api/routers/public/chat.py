@@ -19,6 +19,7 @@ from codura_docs.api.auth.public import CHANNEL, ChannelAccess, limit
 from codura_docs.api.errors import ApiError
 from codura_docs.api.routers.admin.content import replay_from
 from codura_docs.api.sse import sse_response
+from codura_docs.billing.entitlements import Terms, for_tenant
 from codura_docs.config import Settings
 from codura_docs.db.session import rowcount, tenant_session
 from codura_docs.domain.language import localized
@@ -36,19 +37,28 @@ def _ui_lang(request: Request) -> str:
     return (request.headers.get("accept-language") or "en")[:2].lower()
 
 
-async def _assistant(request: Request, c: ChannelAccess) -> dict[str, Any]:
+async def _assistant(request: Request, c: ChannelAccess) -> tuple[dict[str, Any], Terms]:
+    """The Assistant plus the Plan terms; the key's Channel must be on the Plan (FR-65)."""
     async with tenant_session(request.app.state.engine, c.ctx) as s:
         a = await assistants_svc.get(s, c.assistant_id)
+        terms = await for_tenant(s, c.ctx.tenant_id)
     if a is None:
         raise ApiError(404, "not_found", "Assistant not found")
-    return a
+    if not terms.allows_channel(c.channel):
+        raise ApiError(
+            403,
+            "plan_required",
+            "This chat is not available on the current plan",
+            details={"entitlement": "channels"},
+        )
+    return a, terms
 
 
 @router.get("/channel/config")
 async def channel_config(request: Request, c: ChannelAccess = CHANNEL) -> dict[str, Any]:
     settings: Settings = request.app.state.settings
     lang = _ui_lang(request)
-    a = await _assistant(request, c)
+    a, terms = await _assistant(request, c)
     return {
         "assistant": {
             "id": a["id"],
@@ -60,11 +70,11 @@ async def channel_config(request: Request, c: ChannelAccess = CHANNEL) -> dict[s
         "ui_languages": UI_LANGUAGES,
         "features": {"feedback": True, "citations": True},
         "visitor_email": {
-            "mode": a["visitor_email"],
+            "mode": terms.email_mode(a["visitor_email"]),
             "consent_text": localized(a["visitor_email_consent"], lang, ""),
             "privacy_url": a["privacy_url"],
         },
-        "branding": True,  # "Powered by Codura" until M3 Plans add `remove_branding` (FR-55)
+        "branding": not terms.get("remove_branding"),  # FR-55
         "limits": {"max_question_chars": settings.chat_max_question_chars},
     }
 
@@ -97,9 +107,10 @@ async def chat_stream(
         settings.chat_rate_per_visitor_per_min,
     )
 
+    assistant, terms = await _assistant(request, c)
     email_enc = email_hash = None
     if not body.conversation_id:
-        mode = (await _assistant(request, c))["visitor_email"]
+        mode = terms.email_mode(assistant["visitor_email"])
         email = (body.visitor_email or "").strip().lower()
         if mode == "required" and not email:
             raise ApiError(422, "visitor_email_required", "Please enter your email to start")
@@ -115,7 +126,11 @@ async def chat_stream(
 
     slots = [
         (f"key:{c.key_id}", settings.chat_max_concurrent_per_key),
-        (f"tenant:{c.ctx.tenant_id}", settings.chat_max_concurrent_per_tenant),
+        (
+            f"tenant:{c.ctx.tenant_id}",
+            min(settings.chat_max_concurrent_per_tenant, int(terms.get("max_concurrent_answers")))
+            or settings.chat_max_concurrent_per_tenant,
+        ),
     ]
     concurrency = request.app.state.concurrency
     if not concurrency.acquire(slots):

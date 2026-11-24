@@ -125,7 +125,7 @@ async def require_channel_key(request: Request) -> ChannelAccess:
         key is None
         or key.kind != "channel"
         or key.revoked
-        or key.tenant_status != "active"
+        or key.tenant_status not in ("active", "past_due")  # past due: answers "unavailable"
         or not key.assistant_id
     ):
         raise ApiError(401, "unauthenticated", "Invalid or revoked Channel Key")

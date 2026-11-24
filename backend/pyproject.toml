@@ -74,6 +74,7 @@ extend-immutable-calls = ["fastapi.Depends", "fastapi.File", "fastapi.Form", "fa
 "migrations/**" = ["S608"]  # DDL built from constant identifiers only
 # SQL identifiers come from constant column allowlists; all values are bound parameters.
 "src/codura_docs/services/*.py" = ["S608"]
+"src/codura_docs/platform/*.py" = ["S608"]  # SET/column lists from fixed allowlists; values bound
 "src/codura_docs/api/routers/admin/conversations.py" = ["S608"]  # WHERE built from constant fragments; values bound
 "src/codura_docs/api/routers/**" = ["B008"]  # FastAPI dependency idiom
 
@@ -96,6 +97,7 @@ markers = [
   "integration: needs Postgres (set CODURA_TEST_PG_ADMIN_URL)",
   "ollama: needs a running Ollama with the configured models (set CODURA_TEST_OLLAMA_URL)",
   "mailpit: needs a running Mailpit (set CODURA_TEST_SMTP_HOST)",
+  "anthropic: live Anthropic API (set CODURA_TEST_ANTHROPIC_KEY; costs money)",
 ]
 filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]
 

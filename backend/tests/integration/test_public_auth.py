@@ -59,6 +59,22 @@ async def make_key(o: Org, **body: Any) -> tuple[str, str]:
     return r.json()["id"], r.json()["key"]
 
 
+async def platform_client(app: Any) -> httpx.AsyncClient:
+    plat = client_for(app)
+    login = await plat.post(
+        "/api/admin/auth/login", json={"email": "platform@local.test", "password": "admin"}
+    )
+    plat.headers["x-csrf-token"] = login.json()["csrf_token"]
+    return plat
+
+
+async def assign_plan(app: Any, tenant_id: str, plan_code: str) -> None:
+    """Platform Admin puts a Tenant on a Plan (M3); M2 tests need every Channel."""
+    plat = await platform_client(app)
+    r = await plat.put(f"/api/platform/tenants/{tenant_id}/billing", json={"plan_code": plan_code})
+    assert r.status_code == 200, r.text
+
+
 async def build_world(stack: dict[str, Any]) -> World:
     worker = stack["worker"]
     run = uuid.uuid4().hex[:6]
@@ -91,6 +107,7 @@ async def build_world(stack: dict[str, Any]) -> World:
         )
     ).json()["id"]
     w = World(a, b, kb, doc, aid, b_aid)
+    await assign_plan(stack["app"], a.tenant_id, "business")
     for name, body in {
         "widget": {"channel": "widget", "assistant_id": aid, "allowed_origins": [SHOP_A + "/"]},
         "wordpress": {"channel": "wordpress", "assistant_id": aid, "allowed_origins": [SHOP_A]},
@@ -581,6 +598,8 @@ EXEMPT: dict[tuple[str, str], str] = {
     ("GET", "/api/admin/ocr/languages"): "installed packs; no Tenant data",
     ("POST", "/api/admin/debug/jobs/noop"): "dev-only, never mounted in production",
     ("GET", "/api/admin/debug/jobs/{job_id}"): "dev-only, never mounted in production",
+    ("POST", "/api/webhooks/payments/{provider}"): "provider signature only; Tenant from signed "
+    "event (tests/integration/test_billing.py covers forgery, replay and cross-Tenant ids)",
 }
 
 
@@ -591,6 +610,15 @@ async def test_every_route_is_probed_cross_tenant(stack: dict[str, Any]) -> None
         "/api/admin/invites", json={"email": "someone@initech.test", "role": "user"}
     )
     invite_id = inv.json()["invite_id"]
+    # A gets an invoice: Starter, then a prorated upgrade to Growth (manual provider).
+    await assign_plan(app, w.a.tenant_id, "starter")
+    assert (
+        await w.a.client.put("/api/admin/billing/account", json={"country": "IN"})
+    ).status_code == 200
+    up = await w.a.client.post("/api/admin/billing/change-plan", json={"plan_code": "growth"})
+    assert up.status_code == 200, up.text
+    invoice_id = up.json()["invoice_id"]
+    await assign_plan(app, w.a.tenant_id, "business")
     await w.a.client.patch(f"/api/admin/assistants/{w.aid}", json={"hosted_enabled": True})
     a_slug = w.a.me["current_tenant"]["slug"]
     ids = {
@@ -603,6 +631,9 @@ async def test_every_route_is_probed_cross_tenant(stack: dict[str, Any]) -> None
         "invite_id": invite_id,
         "user_id": w.a.me["user"]["id"],
         "tenant_id": w.a.tenant_id,
+        "invoice_id": invoice_id,
+        "plan_id": "plan_growth",
+        "profile_id": "fake-default",
     }
     secrets_of_a = [*ids.values(), "Initech", w.a.me["user"]["email"], "24 months"]
     pub = client_for(app)
@@ -622,8 +653,8 @@ async def test_every_route_is_probed_cross_tenant(stack: dict[str, Any]) -> None
         r = await (client or w.b.client).request(method, target, json=body, headers=headers)
         if expect == "404":
             assert r.status_code == 404, (method, target, r.status_code, r.text)
-        elif expect == "403":
-            assert r.status_code == 403, (method, target, r.status_code, r.text)
+        elif expect.isdigit():
+            assert r.status_code == int(expect), (method, target, r.status_code, r.text)
         else:  # "own": succeeds for B but contains nothing of A's
             assert r.status_code < 400, (method, target, r.status_code, r.text)
             leaked = [s for s in secrets_of_a if s in r.text]
@@ -688,8 +719,48 @@ async def test_every_route_is_probed_cross_tenant(stack: dict[str, Any]) -> None
     )
     await probe("GET", "/api/admin/insights/summary", "own")
     await probe("GET", "/api/admin/insights/unanswered", "own")
+    # Billing (M3): B sees and changes only its own billing; A's invoice ids are 404.
+    await probe("GET", "/api/admin/billing", "own")
+    await probe("GET", "/api/admin/billing/plans", "own")
+    await probe("PUT", "/api/admin/billing/account", "own", {"country": "US"})
+    await probe("PUT", "/api/admin/billing/spend-cap", "own", {"spend_cap_micros": 5_000_000})
+    await probe("POST", "/api/admin/billing/change-plan", "own", {"plan_code": "starter"})
+    await probe("POST", "/api/admin/billing/cancel", "own", {})
+    await probe("POST", "/api/admin/billing/resume", "own", {})
+    await probe("POST", "/api/admin/billing/portal", "409", {})
+    await probe("GET", "/api/admin/billing/invoices", "own")
+    await probe("GET", "/api/admin/billing/invoices/{invoice_id}", "404")
+    await probe("GET", "/api/admin/billing/invoices/{invoice_id}/html", "404")
+    terms = {"prices": {"USD": {"base_micros": 0}, "INR": {"base_micros": 0}}}
     # Platform routes: a Tenant Admin is refused.
     for method, template, body in [
+        ("GET", "/api/platform/plans", None),
+        ("POST", "/api/platform/plans", {"code": "evil", "name": "Evil", **terms}),
+        ("POST", "/api/platform/plans/margin", terms),
+        ("GET", "/api/platform/plans/{plan_id}", None),
+        ("PATCH", "/api/platform/plans/{plan_id}", {"name": "x"}),
+        ("POST", "/api/platform/plans/{plan_id}/versions", terms),
+        ("POST", "/api/platform/plans/{plan_id}/migrate", {}),
+        ("GET", "/api/platform/cost-rates", None),
+        ("PUT", "/api/platform/cost-rates", {"rates": {"fx_usd_inr": 1}}),
+        ("GET", "/api/platform/tenants/{tenant_id}/billing", None),
+        ("PUT", "/api/platform/tenants/{tenant_id}/billing", {"plan_code": "free"}),
+        ("GET", "/api/platform/invoices", None),
+        ("POST", "/api/platform/invoices/{invoice_id}/mark-paid", {}),
+        ("POST", "/api/platform/invoices/{invoice_id}/payment-failed", {}),
+        ("POST", "/api/platform/invoices/{invoice_id}/void", {}),
+        (
+            "POST",
+            "/api/platform/model-profiles",
+            {"id": "evil", "provider": "openai_compat", "model": "x", "license": "commercial-api"},
+        ),
+        ("PATCH", "/api/platform/model-profiles/{profile_id}", {"status": "disabled"}),
+        ("POST", "/api/platform/model-profiles/{profile_id}/default", {}),
+        ("POST", "/api/platform/model-profiles/{profile_id}/test", {}),
+        ("GET", "/api/platform/finance/summary", None),
+        ("GET", "/api/platform/finance/tenants", None),
+        ("POST", "/api/platform/finance/simulate", {"plan_code": "growth"}),
+        ("GET", "/api/platform/finance/funnel", None),
         ("GET", "/api/platform/tenants", None),
         ("GET", "/api/platform/tenants/{tenant_id}", None),
         ("PATCH", "/api/platform/tenants/{tenant_id}", {"status": "suspended"}),

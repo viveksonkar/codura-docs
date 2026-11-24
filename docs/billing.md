@@ -1,6 +1,6 @@
 # Billing, Pricing & Unit Economics
 
-**Status:** Draft v0.1 · **Last updated:** 2026-11-19 · **ADR:** 0019, 0021 · **Implements:** FR-60…71, NFR-14…16
+**Status:** v1.0 (implemented in M3) · **Last updated:** 2026-11-24 · **ADR:** 0019, 0021, 0026 · **Implements:** FR-60…71, NFR-14…16
 
 Goal: **every Tenant is profitable or visibly flagged.** Costs are measured per answer, page and
 Tenant. Prices are derived from cost with a target margin. No Tenant can create unbounded cost.
@@ -101,8 +101,21 @@ instead of the token-inclusive answer price.
 
 ## 5. Plans and Entitlements (starting point, all values editable)
 
-Currency and exact prices are open (PROGRESS Q10). Quantities are a starting point to tune from the
-cost model and real data.
+**Currency (Q10, ADR-0026): India is billed in INR, every other country in USD.** Each Plan version
+has a price per currency. Seeded prices (all editable in the Plan editor, which enforces the margin
+floor) are below. Quantities are a starting point to tune from the cost model and real data. Schema
+and rules: [specs/billing.md](./specs/billing.md).
+
+| | Free | Starter | Growth | Business | Enterprise (hidden, per deal) |
+|---|---|---|---|---|---|
+| USD / month | 0 | $29 | $99 | $299 | $999 |
+| INR / month | 0 | ₹1,999 | ₹6,999 | ₹19,999 | ₹74,999 |
+| Overage per answer | none | $0.020 / ₹1.50 | $0.015 / ₹1.20 | $0.012 / ₹1.00 | $0.010 / ₹0.80 |
+| Overage per OCR page | none | $0.010 / ₹0.80 | $0.008 / ₹0.60 | $0.006 / ₹0.50 | $0.005 / ₹0.40 |
+| Custom LLM fee per answer | — | $0.005 / ₹0.40 | $0.004 / ₹0.30 | $0.003 / ₹0.25 | $0.0025 / ₹0.20 |
+
+Pages stored, storage, users and Assistants are **stock limits** on every Plan: upgrade to raise
+them. Overage applies to answers and OCR pages on paid Plans only.
 
 | | **Free / Trial** | **Starter** | **Growth** | **Business** | **Enterprise** |
 |---|---|---|---|---|---|
@@ -164,9 +177,11 @@ class PaymentProvider(Protocol):
     def verify_webhook(self, headers: Mapping[str, str], body: bytes) -> ProviderEvent: ...
 ```
 
-Adapters: `manual` (default; the Platform Admin records payments; no network), `stripe`
-(Checkout + Customer Portal + invoice items from our ledger; Stripe Tax optional), `razorpay`
-(optional, India). Webhooks: signature verified, deduplicated by event ID, and the only writes they
+Adapters: `manual` (default; the Platform Admin records payments; no network) and `stripe`
+(Checkout for the prorated upgrade charge, then invoices + invoice items from our ledger, the
+Customer Portal for cards; Stripe Tax optional later). Stripe handles both currencies; INR
+customers need a billing address (Checkout collects it). `razorpay` (India) stays optional
+behind the same Port. The exact Port is in [specs/billing.md](./specs/billing.md) §8. Webhooks: signature verified, deduplicated by event ID, and the only writes they
 make are invoice and subscription status.
 
 ## 9. Platform Admin finance views

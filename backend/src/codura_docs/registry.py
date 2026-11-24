@@ -18,6 +18,7 @@ from codura_docs.ports.errors import UnsupportedDocument
 from codura_docs.ports.language import LanguageDetector
 from codura_docs.ports.ocr import OcrEngine
 from codura_docs.ports.parser import Parser
+from codura_docs.ports.payments import PaymentProvider
 from codura_docs.ports.rerank import Reranker
 
 SELF_HOSTED_LICENSES = frozenset({"apache-2.0", "mit"})
@@ -89,6 +90,7 @@ class Registry:
         self._email: EmailSender | None = None
         self._ocr: OcrEngine | None = None
         self._language: LanguageDetector | None = None
+        self._payments: PaymentProvider | None = None
         self.seed_profiles: dict[str, ModelProfile] = {
             pid: profile_from_seed(pid, seed, settings)
             for pid, seed in models.chat_profiles.items()
@@ -119,6 +121,10 @@ class Registry:
             from codura_docs.adapters.openai_compat.chat import OpenAICompatChatModel
 
             model = OpenAICompatChatModel(profile)
+        elif profile.provider == "anthropic":
+            from codura_docs.adapters.anthropic.chat import AnthropicChatModel
+
+            model = AnthropicChatModel(profile)
         elif profile.provider == "fake":
             from codura_docs.adapters.fake.chat import FakeChatModel
 
@@ -245,6 +251,29 @@ class Registry:
 
                 self._language = LinguaDetector()
         return self._language
+
+    def payments(self) -> PaymentProvider:
+        if "payments" in self._overrides:
+            return self._overrides["payments"]  # type: ignore[no-any-return]
+        if self._payments is None:
+            s = self.settings
+            if s.payment_provider == "stripe":
+                from codura_docs.adapters.payments.stripe import StripePaymentProvider
+
+                if not (s.stripe_secret_key and s.stripe_webhook_secret):
+                    raise ConfigError(
+                        "PAYMENT_PROVIDER=stripe requires STRIPE_SECRET_KEY and STRIPE_WEBHOOK_SECRET"
+                    )
+                self._payments = StripePaymentProvider(
+                    s.stripe_secret_key.get_secret_value(),
+                    s.stripe_webhook_secret.get_secret_value(),
+                    api_base=s.stripe_api_base,
+                )
+            else:
+                from codura_docs.adapters.payments.manual import ManualPaymentProvider
+
+                self._payments = ManualPaymentProvider()
+        return self._payments
 
     def reranker(self, name: str | None = None) -> Reranker:
         from codura_docs.adapters.rerank.noop import NoopReranker

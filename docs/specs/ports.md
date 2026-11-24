@@ -3,8 +3,7 @@
 **Status:** Draft v0.2 · **Last updated:** 2026-11-18 · **Frozen by:** M0-04 · **ADR:** 0004, 0008, 0009, 0015, 0016
 
 Location: `backend/src/codura_docs/ports/`. Ports: `ChatModel`, `EmbeddingModel`, `Parser`,
-`OcrEngine`, `BlobStore`, `Reranker`, `EmailSender`. (`PaymentProvider` is frozen in
-`specs/billing.md`, M3.) Ports are `typing.Protocol`s plus frozen dataclasses /
+`OcrEngine`, `BlobStore`, `Reranker`, `EmailSender`, `PaymentProvider` (§9, M3). Ports are `typing.Protocol`s plus frozen dataclasses /
 Pydantic models. They import nothing outside the standard library and Pydantic.
 
 ## 1. Chat
@@ -274,3 +273,28 @@ entry-point plugin magic.
 2. Passes `tests/contract/` suites for every Port it implements.
 3. Maps errors to §6; sets `is_local` truthfully.
 4. Documented in [architecture.md](../architecture.md) §4 table and `.env.example`.
+
+## 9. Payments (M3-00, ADR-0026)
+
+```python
+# ports/payments.py: full definitions in specs/billing.md section 8
+class PaymentProvider(Protocol):
+    name: str                      # 'manual' | 'stripe'
+    immediate_upgrades: bool       # manual: True; stripe: False (Checkout redirect, applied on webhook)
+    async def ensure_customer(self, account: BillingAccount) -> str: ...
+    async def create_checkout(self, req: CheckoutRequest) -> CheckoutSession: ...       # url None = immediate
+    async def report_invoice(self, invoice: InvoiceDraft) -> ExternalInvoiceRef: ...    # OUR amounts, their collection
+    async def customer_portal_url(self, customer_id: str, return_url: str) -> str | None: ...
+    def verify_webhook(self, headers: Mapping[str, str], body: bytes) -> ProviderEvent: ...  # WebhookVerificationError
+```
+
+Adapters: `manual` (default, no network), `stripe` (plain httpx, form-encoded REST, `Stripe-Signature`
+HMAC with 5-minute tolerance, Idempotency-Key on every write). Errors: `PaymentProviderError`.
+Contract suite: `tests/contract/test_payment_contract.py`.
+
+The `anthropic` ChatModel adapter (M3-12) uses the Messages API over plain httpx with
+`anthropic-version: 2026-10-21`. It sends no sampling parameters (that API version rejects them)
+and sets depth with `output_config.effort` (profile param `effort`, default `low`). Optional
+profile params are `prompt_caching` and `fallbacks` (default on). Its contract cases run against
+a recorded stream by default, and live with `CODURA_TEST_ANTHROPIC_KEY` (marker `anthropic`).
+

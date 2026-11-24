@@ -16,7 +16,7 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -24,6 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from codura_docs import metering
+from codura_docs.billing.entitlements import for_tenant
 from codura_docs.crypto import Keyring
 from codura_docs.db.session import tenant_session
 from codura_docs.domain.language import answer_language, language_name, localized
@@ -35,11 +36,12 @@ from codura_docs.domain.prompting import (
 )
 from codura_docs.domain.retrieval import RetrievalSettings
 from codura_docs.ids import new_id
+from codura_docs.metering import quotas
 from codura_docs.ports.chat import ChatDelta, ChatDone, ChatParams, ModelProfile
 from codura_docs.ports.errors import ProviderError
 from codura_docs.registry import Registry
 from codura_docs.services import assistants as assistants_svc
-from codura_docs.services.model_resolution import NoModelProfile, resolve_model
+from codura_docs.services.model_resolution import NoModelProfile, resolve
 from codura_docs.services.retrieval import retrieve
 from codura_docs.tenancy import TenantContext
 
@@ -114,7 +116,6 @@ async def answer(
     req: AnswerRequest, *, engine: AsyncEngine, registry: Registry, keyring: Keyring
 ) -> AsyncIterator[AnswerEvent]:
     started = time.perf_counter()
-    settings = registry.settings
     tid = req.ctx.tenant_id
     detector = registry.language()
 
@@ -186,13 +187,29 @@ async def answer(
             ),
             {"id": user_msg_id, "t": tid, "c": conversation_id, "q": req.question, "l": language},
         )
-        quota = await metering.check_quota(s, settings, tid, "answer")
+        # Plan, model and quota BEFORE any LLM call (ADR-0021, specs/billing.md sections 4-5).
+        terms = await for_tenant(s, tid)
         profile: ModelProfile | None = None
-        if quota.allowed:
+        meter: metering.Meter = "answer"
+        admission: quotas.Admission | None = None
+        blocked: str | None = "unavailable" if terms.past_due else None
+        if blocked is None:
             try:
-                profile = await resolve_model(s, tid, keyring)
+                resolved = await resolve(s, tid, keyring, terms)
+                profile = resolved.profile
+                meter = "answer_custom_llm" if resolved.custom_llm else "answer"
             except NoModelProfile:
-                profile = None
+                blocked = "error"
+        if blocked is None:
+            admission = await quotas.admit(s, tid, meter, terms=terms)
+            if not admission.allowed:
+                blocked = "limit"
+        custom_infra = (
+            await metering.cost_rate(s, "custom_llm_infra_per_answer")
+            if meter == "answer_custom_llm"
+            else 0
+        )
+    reservation_id = admission.reservation_id if admission else None
     yield Meta(conversation_id, asst_msg_id, user_msg_id, language)
 
     async def persist(
@@ -248,25 +265,35 @@ async def answer(
                 await metering.record(
                     s2,
                     tid,
-                    "answer",
+                    meter,
                     1,
-                    cogs_micros=cogs,
+                    # Custom LLM: the Tenant pays its provider; we carry the infra share only.
+                    cogs_micros=custom_infra if meter == "answer_custom_llm" else cogs,
                     idempotency_key=asst_msg_id,
                     model_profile_id=profile.id if profile else None,
                     attrs={
                         "channel": req.channel,
                         "prompt_tokens": prompt_tokens,
                         "completion_tokens": completion_tokens,
+                        "overage": bool(admission and admission.reason == "overage"),
                     },
+                    reservation_id=reservation_id,
                 )
+            else:
+                await quotas.release(s2, reservation_id)
 
-    # --- 2. over quota / no model -----------------------------------------------------------------
-    if not quota.allowed or profile is None:
-        reason = "limit" if not quota.allowed else "error"
+    # --- 2. over quota / past due / no model --------------------------------------------------------
+    if blocked is not None or profile is None:
+        reason = blocked or "error"
+        defaults = (
+            assistants_svc.DEFAULT_UNAVAILABLE
+            if reason == "unavailable"
+            else assistants_svc.DEFAULT_LIMIT
+        )
         text_out = localized(
-            assistant["limit_reached_text"],
+            {} if reason == "unavailable" else assistant["limit_reached_text"],
             language,
-            assistants_svc.DEFAULT_LIMIT.get(language, assistants_svc.DEFAULT_LIMIT["default"]),
+            defaults.get(language, defaults["default"]),
         )
         await persist(text_out, "limit" if reason == "limit" else "error", reason)
         yield Delta(text_out)
@@ -275,7 +302,8 @@ async def answer(
         return
 
     chat = registry.chat(profile)
-    max_out = min(profile.max_output_tokens, settings.trial_max_output_tokens)
+    # Worst-case cost per answer is bounded by the Plan (NFR-16).
+    max_out = min(profile.max_output_tokens, int(terms.get("max_output_tokens")))
     cogs_total = 0
 
     # --- 3. standalone query + retrieval ----------------------------------------------------------
@@ -291,6 +319,12 @@ async def answer(
                 profile, rdone.usage.prompt_tokens, rdone.usage.completion_tokens
             )
         rsettings = RetrievalSettings.from_dict(assistant["retrieval"] or {})
+        budget = min(
+            rsettings.context_token_budget,
+            int(terms.get("context_token_budget")),
+            max(200, int(terms.get("max_input_tokens")) - 1000),  # room for prompt + history
+        )
+        rsettings = replace(rsettings, context_token_budget=budget)
         async with tenant_session(engine, req.ctx) as s3:
             pack = await retrieve(
                 s3,

@@ -35,7 +35,7 @@ system_settings(key text PK, value jsonb)          -- 'embedding' → {provider,
 
 tenants(id PK, slug citext UNIQUE, name,
         status CHECK (status IN ('pending_verification','active','past_due','suspended')),
-        plan_code text DEFAULT 'trial',            -- replaced by subscriptions in M3 (specs/billing.md)
+        plan_code text DEFAULT 'trial',            -- DEPRECATED (M3): the Plan comes from subscriptions (specs/billing.md)
         model_profile_override text NULL REFERENCES model_profiles(id),   -- Platform Admin only (ADR-0019)
         ocr_languages text DEFAULT 'eng', default_language text DEFAULT 'en',
         created_at, updated_at)                    -- not RLS'd; read via platform role or by id from a verified credential
@@ -161,7 +161,7 @@ messages(id PK, tenant_id, conversation_id, role CHECK (role IN ('user','assista
          FOREIGN KEY (tenant_id, conversation_id) REFERENCES conversations(tenant_id, id) ON DELETE CASCADE)
 ```
 
-## 7. Models, metering and costs (M1-00; billing tables in specs/billing.md, M3)
+## 7. Models, metering and costs (M1-00; billing tables in specs/billing.md §2, migration 0004)
 
 ```sql
 model_profiles(id PK,                                    -- e.g. 'local-default'
@@ -184,8 +184,18 @@ usage_events(id PK, tenant_id, meter text, quantity numeric, cogs_micros bigint,
 CREATE INDEX usage_events_tenant_time ON usage_events (tenant_id, occurred_at);
 
 usage_counters(tenant_id, meter, period_start date, quantity numeric DEFAULT 0, cogs_micros bigint DEFAULT 0,
+               updated_at,                                       -- M3 (0004)
                PRIMARY KEY (tenant_id, meter, period_start))      -- RLS'd; updated in the same tx as the event
 ```
+
+M3 adds (normative in `0004_billing.py`, described in [specs/billing.md](./billing.md) §2):
+- Catalogue: `plans`, `plan_versions` (immutable once used), `plan_prices`.
+- Tenant tables (forced RLS; `codura_app` reads only, ADR-0026 §4): `billing_accounts`,
+  `subscriptions`, `subscription_events`, `tenant_billing_overrides`, `quota_reservations`,
+  `quota_notices`, `usage_rollups`, `invoices`, `invoice_lines`, `payments`.
+- Global: `payment_events` (webhook dedupe) and `scheduled_runs`.
+
+`codura_worker` may update its own Tenant's `tenants.status`, for past due.
 
 ## 8. Deletion semantics
 

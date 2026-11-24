@@ -22,6 +22,12 @@ PREFIXES = frozenset(
         "tok",
         "aud",
         "ue",
+        "plv",
+        "sev",
+        "bill",
+        "line",
+        "pay",
+        "qres",
     }
 )
 _ULID = r"[0-9A-HJKMNP-TV-Z]{26}"

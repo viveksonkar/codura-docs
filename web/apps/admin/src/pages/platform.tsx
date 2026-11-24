@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { patch, post } from "../api";
+import { Link } from "../router";
 import { Alert, StatusBadge, errorText, useData, when } from "../ui";
 
 interface TenantRow {
@@ -23,7 +24,7 @@ export function PlatformTenants() {
       <input placeholder="Search name or slug" value={q} onChange={(e) => setQ(e.target.value)} />
       {msg && <Alert kind={msg.kind}>{msg.text}</Alert>}
       <table>
-        <thead><tr><th>Organisation</th><th>Status</th><th>Users</th><th>Docs</th><th>Answers (month)</th><th>COGS (month)</th><th>Model override</th><th /></tr></thead>
+        <thead><tr><th>Organisation</th><th>Status</th><th>Users</th><th>Docs</th><th>Answers (month)</th><th>COGS (month)</th><th>Model override</th><th>Billing</th><th /></tr></thead>
         <tbody>{tenants.data?.items.map((t) => (
           <tr key={t.id}>
             <td>{t.name}<div className="muted small">{t.slug} · since {when(t.created_at)}</div></td>
@@ -35,27 +36,11 @@ export function PlatformTenants() {
               <option value="">Default</option>
               {profiles.data?.items.filter((p) => !p.tenant_id && p.status === "active").map((p) => <option key={p.id} value={p.id}>{p.id}</option>)}
             </select></td>
+            <td><Link to={`/platform/tenants/${t.id}/billing`}>{t.plan_code}</Link></td>
             <td>{t.status === "suspended"
               ? <button className="link" onClick={() => void act(() => patch(`/api/platform/tenants/${t.id}`, { status: "active" }), "Reactivated")}>Reactivate</button>
               : <button className="link danger" onClick={() => confirm(`Suspend ${t.name}? Their chat and console stop working.`) && void act(() => patch(`/api/platform/tenants/${t.id}`, { status: "suspended" }), "Suspended")}>Suspend</button>}</td>
           </tr>))}</tbody>
-      </table>
-    </>
-  );
-}
-
-export function PlatformModels() {
-  const { data } = useData<{ items: Profile[] }>("/api/platform/model-profiles");
-  return (
-    <>
-      <h1>Model Profiles</h1>
-      <p className="muted">Platform-managed answering models (ADR-0019). Editing, prices and Custom LLM arrive with monetisation (M3). Self-hosted models must be Apache-2.0 or MIT.</p>
-      <table>
-        <thead><tr><th>Profile</th><th>Provider</th><th>Model</th><th>Licence</th><th>Where</th><th>Price in/out per 1M tokens</th><th /></tr></thead>
-        <tbody>{data?.items.map((p) => (
-          <tr key={p.id}><td>{p.id}{p.is_default && <span className="badge badge-ready">default</span>}</td><td>{p.provider}</td><td><code>{p.model}</code></td>
-            <td>{p.license}</td><td>{p.is_local ? "local" : <span className="warn">data leaves this server</span>}</td>
-            <td>${(p.price_in_per_mtok_micros / 1e6).toFixed(2)} / ${(p.price_out_per_mtok_micros / 1e6).toFixed(2)}</td><td><StatusBadge status={p.status} /></td></tr>))}</tbody>
       </table>
     </>
   );

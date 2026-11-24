@@ -213,6 +213,25 @@ def _seed_demo_tenant(conn: Connection, settings: Settings) -> None:
             {"t": tenant_id, "u": user_id, "r": role},
         )
     _seed_demo_assistant(conn, settings, str(tenant_id))
+    # Demo runs on Growth (manual billing, USD) so local demos and e2e never hit Free limits.
+    conn.execute(
+        text(
+            "INSERT INTO billing_accounts (tenant_id, country, currency, billing_email, company_name, provider) "
+            "VALUES (:t, 'US', 'USD', :e, 'Demo Organisation', 'manual') ON CONFLICT (tenant_id) DO NOTHING"
+        ),
+        {"t": tenant_id, "e": DEMO_ADMIN_EMAIL},
+    )
+    conn.execute(
+        text(
+            "INSERT INTO subscriptions (id, tenant_id, plan_version_id, status, period_start) "
+            "SELECT 'sub_' || :t, :t, current_version_id, 'active', date_trunc('month', now())::date "
+            "FROM plans WHERE code = 'growth' "
+            "ON CONFLICT (tenant_id) DO UPDATE SET plan_version_id = EXCLUDED.plan_version_id, "
+            "status = 'active', trial_ends_at = NULL "
+            "WHERE subscriptions.plan_version_id = 'plv_free_1' AND subscriptions.status <> 'past_due'"
+        ),
+        {"t": tenant_id},
+    )
 
 
 def run_bootstrap(settings: Settings) -> None:

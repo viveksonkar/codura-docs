@@ -164,6 +164,12 @@ def require_tenant(
             raise ApiError(403, "tenant_suspended", "This organisation is suspended")
         if role == "admin" and access.role != "admin":
             raise ApiError(403, "forbidden", "Tenant Admin role required")
+        if active and access.tenant_status == "past_due":  # billing.md section 7: read-only console
+            raise ApiError(
+                402,
+                "payment_required",
+                "Your subscription is past due. Update your payment under Billing.",
+            )
         if active and access.tenant_status != "active":
             raise ApiError(403, "email_not_verified", "Verify your email to unlock this action")
         tenant_id_var.set(access.tenant_id)

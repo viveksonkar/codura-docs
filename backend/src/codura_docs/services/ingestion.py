@@ -12,17 +12,21 @@ from typing import Any
 from sqlalchemy import text
 
 from codura_docs import metering
+from codura_docs.billing.entitlements import for_tenant
 from codura_docs.db.session import tenant_session
+from codura_docs.domain import mime
 from codura_docs.domain.blobs import blob_key
 from codura_docs.domain.chunking import chunk
 from codura_docs.jobs.handlers import JobContext, handler
 from codura_docs.jobs.queue import NonRetryable
+from codura_docs.metering import quotas
 from codura_docs.ports.errors import ParseError, UnsupportedDocument
 from codura_docs.ports.parser import ParsedDocument, ParseOptions
 from codura_docs.tenancy import TenantContext
 
 log = logging.getLogger(__name__)
 PARSE_TIMEOUT_S = 900
+OCR_CAPABLE = frozenset({mime.PDF, mime.PNG, mime.JPEG, mime.TIFF, mime.WEBP})
 
 
 def vector_literal(vec: list[float]) -> str:
@@ -73,8 +77,16 @@ async def ingest_document(jc: JobContext) -> None:
         )
         if doc is None:
             return  # deleted meanwhile: nothing to do (idempotent)
-        quota = await metering.check_quota(s, settings, ctx.tenant_id, "page_ingested")
-        if not quota.allowed:
+        # Quota BEFORE parsing/OCR (specs/billing.md section 4): pages stored is a stock limit on
+        # every Plan; OCR is admitted per Document while allowance (or overage) remains.
+        terms = await for_tenant(s, ctx.tenant_id)
+        stock = await quotas.check_stock(s, terms, "pages_stored", 1 - (doc["page_count"] or 0))
+        ocr_open = True
+        if doc["mime_type"] in OCR_CAPABLE:
+            ocr = await quotas.admit(s, ctx.tenant_id, "page_ocr", 1, terms=terms)
+            await quotas.release(s, ocr.reservation_id)
+            ocr_open = ocr.allowed
+        if terms.past_due or not stock.allowed or not ocr_open:
             await s.execute(
                 text(
                     "UPDATE documents SET status = 'pending', error = 'quota_exceeded' WHERE id = :id"
@@ -183,6 +195,26 @@ async def ingest_document(jc: JobContext) -> None:
     tokens = sum(d.token_count for d in drafts)
 
     async with tenant_session(engine, ctx) as s:
+        current = (await quotas.stock_usage(s, ctx.tenant_id))["pages_stored"]
+        previous = (
+            await s.execute(
+                text(
+                    "SELECT coalesce(page_count, 0) FROM documents WHERE id = :id AND status = 'processing'"
+                ),
+                {"id": doc_id},
+            )
+        ).scalar() or 0
+        if current - float(previous) + pages > float(
+            (await for_tenant(s, ctx.tenant_id)).limit("pages_stored")
+        ):
+            await s.execute(
+                text(
+                    "UPDATE documents SET status = 'pending', error = 'quota_exceeded', updated_at = now() "
+                    "WHERE id = :id"
+                ),
+                {"id": doc_id},
+            )
+            return
         ingest_n = (
             int(
                 (

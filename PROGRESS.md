@@ -9,10 +9,10 @@ first.
 
 | | |
 |---|---|
-| Phase | M0, M1 and M2 done: **the MVP is complete** (requirements.md §6 steps 1–9) |
-| Current milestone | M3 Monetisation, [ledger/M3.md](./docs/ledger/M3.md) (decomposed) |
-| Next Task(s) | M3-00 billing spec + schema (freeze gate), then Wave 1: M3-01, M3-08, M3-10, M3-12 |
-| Blocked | M3-06 needs Stripe test keys; Q10 (currency/provider) should be answered before M3-06 |
+| Phase | M0–M3 done: MVP + **monetisation** (Plans, quotas, invoices, Stripe adapter, finance, Custom LLM) |
+| Current milestone | M4 WordPress plugin & Android, [ledger/M4.md](./docs/ledger/M4.md) (decomposed) |
+| Next Task(s) | M4-00 Channel contract freeze, then Wave 1: M4-01, M4-02, M4-03 |
+| Blocked | Live Stripe test-mode run (M3-06) waits for the owner's test keys; adapter and webhooks are tested against mocked HTTPS |
 | Last updated | 2026-11-24 |
 
 **Runs today on the dev box (GTX 1060 6 GB):** `docker compose up -d` → Admin Console at
@@ -23,7 +23,12 @@ model override, suspend, audit). **Web Channel:** Channels page (Channel Keys wi
 Widget snippet, Hosted Chat Page toggle with link + QR) → Hosted Chat Page at `/c/{tenant}/{assistant}`
 (seeded `/c/demo/help`) and the embeddable `<codura-chat>` Widget (`/demo/` locally) → optional
 Visitor email → feedback → Conversation log viewer → Insights with unanswered questions and
-Visitor emails.
+Visitor emails. **Billing:**
+- Tenants see Billing: Plan, usage vs quota with projection, plans in INR (India) or USD, upgrade
+  (prorated, `manual` applies at once), downgrade/cancel at month end, spend cap, invoices.
+- Platform Admins see Plans (versioned, live margin floor), Model Profiles (create/test/default,
+  Custom LLM), Tenant billing (assign Plan, overrides), Invoices (mark paid), Finance (MRR,
+  margins, unprofitable Tenants, simulator, funnel) and Cost rates.
 
 ## Owner decisions
 
@@ -36,13 +41,13 @@ Visitor emails.
 | D10 | The LLM is platform-managed; a Custom LLM per Tenant only when a Platform Admin enables it | ADR-0019 |
 | D11 | Monetised SaaS: metering, Plans, margin floor, telemetry | ADR-0021, ADR-0022, billing.md, telemetry.md |
 | Q3 resolved | Launch languages: en, hi, es, fr, de, ar, zh | NFR-13 |
+| Q10 resolved (2026-11-24) | INR for Tenants billed in India, USD for the rest of the world; Stripe first (test keys later); `manual` locally | ADR-0026, specs/billing.md |
 
 ## Open questions
 
 | # | Question | Default taken |
 |---|---|---|
 | Q5 | Android: SDK for other apps, a standalone app, or both? | SDK + sample app (M4) |
-| Q10 | Billing currency and payment provider (Stripe vs Razorpay; INR/USD)? | `manual` provider locally; Stripe adapter first (M3) |
 | Q11 | Production hosting: one GPU VPS with vLLM, a hosted open-weight API, or Anthropic/OpenAI for premium Plans? | Decide with the M6 load test; prices are already metered per Model Profile |
 
 ## Known gaps / follow-ups
@@ -60,9 +65,24 @@ Visitor emails.
   lighter detector if image size matters.
 - **Tenant deletion:** Blobs under the Tenant prefix are not yet purged (needs a BlobStore
   list/delete-prefix operation).
-- The Platform Console shows Model Profiles read-only. Editing, prices and Custom LLM come in M3.
-- **M4 toolchains:** the dev box has PHP 5.6 (the plugin targets 8.1+) and no Android SDK. The
-  WordPress plugin can be tested in the planned `wp` compose profile; Android needs an SDK/emulator.
+- **Stripe live run:** set `STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` (test mode) and
+  `PAYMENT_PROVIDER=stripe`. Then point a Stripe webhook (or `stripe listen`) at
+  `/api/webhooks/payments/stripe` with `checkout.session.completed`, `invoice.paid` and
+  `invoice.payment_failed`, and run one upgrade by hand. INR needs a Stripe account that can
+  charge INR.
+- **Taxes:** GST/VAT aren't computed. Tax ID and country are stored; Stripe Tax can be switched on
+  later (ADR-0026).
+- **Live Anthropic contract** runs only with `CODURA_TEST_ANTHROPIC_KEY` (it costs money). The
+  recorded-stream contract runs in every CI run.
+- **Margin floor inputs:** the seed `cost_rates` (`fx_usd_inr` 84, fees, fixed cost, utilisation)
+  are placeholders. Set real values in Platform Console → Cost rates before setting prices.
+- **M4 toolchains:**
+  - PHP 8.3 is installed at
+    `%LOCALAPPDATA%\Microsoft\WinGet\Packages\PHP.PHP.NTS.8.3_*`, but the machine PATH lists WAMP's
+    PHP 5.6 first. Fixing that needs an elevated shell.
+  - Composer isn't installed yet.
+  - The Android SDK is at `C:\Android\sdk` (platform 35, build-tools 35, platform-tools; JDK 17),
+    with no emulator image yet.
 
 ## Session log
 
@@ -73,6 +93,43 @@ Visitor emails.
 - **Learned / changed in spec:** … (link ADRs or doc sections edited)
 - **Next:** …
 -->
+
+### 2026-11-24 — M3 Monetisation complete; M4 decomposed; M4 toolchains installed
+- **Did:**
+  - All 14 M3 Tasks:
+    - billing spec + ADR-0026 + migration 0004;
+    - Entitlements service; quota reservations; rollups + reconciliation + worker scheduler;
+    - subscriptions lifecycle; invoices/ledger; `manual` + `stripe` PaymentProviders with signed,
+      deduplicated webhooks;
+    - Anthropic adapter; Plan editor with margin floor; Model Profile management + Custom LLM;
+    - finance views; Tenant Billing page + quota banner; Platform Console Plans / Models / Tenant
+      billing / Invoices / Finance / Cost rates.
+  - The demo Tenant is seeded on Growth.
+  - Smoke has 9 checks (billing).
+  - M2 branch committed and pushed (`task/m2-web-channel`).
+  - Installed PHP 8.3 and the Android SDK.
+- **Verified:**
+  - Static checks: ruff, format, mypy --strict and import-linter clean.
+  - Backend: 122 pass, 13 skipped. New suites:
+    - `test_billing.py` (9 flows): write boundary, INR upgrade, hard stop + 20-way concurrency,
+      period invoice = ledger + reconciliation, Stripe webhooks/forgery/replay/past-due, margin
+      floor + versions, finance flag, Custom LLM, scheduler.
+    - Payment and Anthropic contracts.
+    - The cross-Tenant gate now covers every billing route.
+  - Web: 54 Vitest (widget 43, admin 6, chat-client 5); widget 38.3 KB gz.
+  - Playwright: 11 specs incl. billing UI.
+  - `smoke.sh` and `smoke.ps1`: 9/9 on the rebuilt stack.
+- **Learned / changed in spec:**
+  - Billing writes run as `codura_worker` inside RLS; `codura_app` is SELECT-only on billing
+    (ADR-0026).
+  - Calendar-month periods: fee in advance, overage in arrears.
+  - Stock limits (pages, storage, users, Assistants) never overage.
+  - OCR is admitted per Document (specs/billing.md §4).
+  - `trial_*` settings were removed (the Trial is the Growth Plan's limits for 14 days).
+  - `tenants.plan_code` is deprecated.
+  - The demo Tenant on Growth hides the "Powered by" footer (parity e2e updated).
+- **State:** branch `task/m3-monetisation` (from `task/m2-web-channel`), not committed.
+- **Next:** M4-00, then the WordPress plugin (Docker `wp` profile, PHP 8.3) and the Android client.
 
 ### 2026-11-24 — M1 closed, M2 (Web Channel MVP) complete, M3 decomposed
 - **Did:** M1-14 and M1-18 closed. All 12 M2 Tasks: Channel Keys service + admin API with
@@ -95,7 +152,7 @@ Visitor emails.
   in the previous turn's language. The detector now also accepts a clear lead (rag-pipeline.md §3).
   Hosted keys must be retrievable, so they are stored encrypted (ADR-0025). `/widget/v1/` is cached
   for 1 h rather than immutably (channels.md §3). `api.md` §2/§3 and `db.md` §2 updated.
-- **State:** branch `task/m2-web-channel`, not committed.
+- **State:** branch `task/m2-web-channel`, committed and pushed (`df1bdb9`).
 - **Next:** M3-00 (billing spec + schema freeze), ideally after the owner answers Q10.
 
 ### 2026-11-19 — M0 complete, M1 implemented

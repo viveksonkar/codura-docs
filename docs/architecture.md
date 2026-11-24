@@ -122,7 +122,7 @@ in specs/billing.md, M3):
 | `BlobStore` | `local` (volume) | `s3` (any S3-compatible) | Yes (config) |
 | `Reranker` | `none` | cross-encoder (M5) | Yes (per Plan) |
 | `EmailSender` | `smtp` → Mailpit locally | any SMTP relay | Yes (config) |
-| `PaymentProvider` | `manual` (no network) | `stripe`, `razorpay` (M3) | Yes (config) |
+| `PaymentProvider` | `manual` (no network) | `stripe` (M3), `razorpay` (optional, later) | Yes (config) |
 
 Seed config (`config/models.yaml`, loaded into `model_profiles` on first boot; afterwards the
 Platform Console is authoritative):

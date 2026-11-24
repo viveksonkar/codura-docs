@@ -24,6 +24,7 @@ _STATUS_CODES = {
     413: "document_too_large",
     415: "unsupported_media_type",
     422: "validation_error",
+    402: "payment_required",
     429: "rate_limited",
     503: "provider_unavailable",
 }
@@ -62,6 +63,19 @@ def install_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             error_body(exc.code, exc.message, exc.details), exc.status, headers=exc.headers
         )
+
+    from codura_docs.billing.entitlements import PlanRequired
+    from codura_docs.billing.subscriptions import BillingError
+
+    @app.exception_handler(PlanRequired)
+    async def _plan_required(_: Request, exc: PlanRequired) -> JSONResponse:
+        return JSONResponse(
+            error_body("plan_required", str(exc), {"entitlement": exc.entitlement}), 403
+        )
+
+    @app.exception_handler(BillingError)
+    async def _billing_error(_: Request, exc: BillingError) -> JSONResponse:
+        return JSONResponse(error_body(exc.code, exc.message, exc.details), exc.status)
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:

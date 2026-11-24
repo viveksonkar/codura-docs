@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from codura_docs.api.deps import TenantAccess, require_tenant
 from codura_docs.api.errors import ApiError
+from codura_docs.billing.entitlements import for_tenant, require_channel
 from codura_docs.db.session import tenant_session
 from codura_docs.services import channel_keys
 
@@ -48,6 +49,8 @@ async def create_key(
 ) -> dict[str, Any]:
     try:
         async with tenant_session(request.app.state.engine, a.ctx) as s:
+            if body.kind == "channel" and body.channel:
+                require_channel(await for_tenant(s, a.tenant_id), body.channel)
             key_id, plaintext = await channel_keys.create_key(
                 s,
                 a.tenant_id,

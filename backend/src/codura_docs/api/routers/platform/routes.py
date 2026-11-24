@@ -82,12 +82,6 @@ async def delete_tenant(tenant_id: str, request: Request, p: Principal = PLATFOR
             raise ApiError(404, "not_found", "Tenant not found")
 
 
-@router.get("/model-profiles")
-async def model_profiles(request: Request, _: Principal = PLATFORM) -> dict[str, Any]:
-    async with global_session(_engine(request)) as s:
-        return {"items": await platform.list_model_profiles(s)}
-
-
 @router.get("/audit")
 async def audit(request: Request, _: Principal = PLATFORM) -> dict[str, Any]:
     async with global_session(_engine(request)) as s:

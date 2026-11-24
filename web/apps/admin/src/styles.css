@@ -78,3 +78,12 @@ table.bars td { border: 0; } .bar { display: inline-block; height: 10px; border-
 td.num { width: 60px; text-align: right; font-variant-numeric: tabular-nums; }
 .transcript .plain { white-space: pre-wrap; }
 fieldset.theme { border: 1px solid var(--line); border-radius: 8px; display: grid; gap: 8px; padding: 10px; }
+
+/* M3: billing */
+.card.plan.current { border-color: var(--accent); }
+.card.plan ul { padding-left: 18px; }
+.badge-trialing { background: #e8f0fe; color: #1a3d8f; } .badge-past_due, .badge-void, .badge-uncollectible { background: #fdecea; color: #8a1f13; }
+.badge-open { background: #fff4e0; color: #7a4a00; } .badge-paid { background: #e6f4ea; color: #145c32; }
+tr.flagged td { background: rgba(192, 57, 43, .06); }
+h4 { margin: 12px 0 4px; font-size: 13px; }
+

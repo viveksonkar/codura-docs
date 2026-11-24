@@ -100,7 +100,9 @@ def create_app(
     app.add_middleware(PublicCorsMiddleware)
     app.add_middleware(MetricsMiddleware)
     app.add_middleware(RequestIdMiddleware)
+    from codura_docs.api.routers import webhooks
     from codura_docs.api.routers.admin import auth as auth_routes
+    from codura_docs.api.routers.admin import billing as admin_billing
     from codura_docs.api.routers.admin import (
         channel_keys,
         content,
@@ -109,6 +111,9 @@ def create_app(
         tenant,
         visitor_emails,
     )
+    from codura_docs.api.routers.platform import billing as platform_billing
+    from codura_docs.api.routers.platform import finance as platform_finance
+    from codura_docs.api.routers.platform import models as platform_models
     from codura_docs.api.routers.platform import routes as platform_routes
     from codura_docs.api.routers.public import chat, hosted
     from codura_docs.crypto import Keyring
@@ -116,6 +121,8 @@ def create_app(
 
     app.state.keyring = Keyring.from_settings(settings)
     app.state.platform_engine = _make_engine(settings.database_platform_url, pool_size=3)
+    # Billing writes: codura_worker role inside tenant_session (ADR-0026 section 4).
+    app.state.billing_engine = _make_engine(settings.database_worker_url, pool_size=3)
     app.include_router(health.router)
     for r in (
         auth_routes.router,
@@ -126,7 +133,12 @@ def create_app(
         conversations.router,
         visitor_emails.router,
         insights.router,
+        admin_billing.router,
+        webhooks.router,
         platform_routes.router,
+        platform_billing.router,
+        platform_models.router,
+        platform_finance.router,
         chat.router,
         hosted.router,
     ):

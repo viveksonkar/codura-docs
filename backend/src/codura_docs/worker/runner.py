@@ -9,10 +9,12 @@ import os
 import signal
 import socket
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 
 from psycopg import AsyncConnection as PgConnection
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+import codura_docs.jobs.billing_period
 import codura_docs.services.ingestion  # noqa: F401 - registers ingest/purge/email Job handlers
 from codura_docs.config import Settings
 from codura_docs.context import job_id_var, tenant_id_var
@@ -68,7 +70,7 @@ class Worker:
         try:
             if handler is None:
                 raise NonRetryable(f"no handler for kind {job.kind!r}")
-            await handler(JobContext(job, self.app_engine, self.registry))
+            await handler(JobContext(job, self.app_engine, self.registry, self.worker_engine))
         except NonRetryable as exc:
             await self._finish_failed(job, str(exc), retryable=False)
         except Exception as exc:
@@ -126,9 +128,51 @@ class Worker:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.stopping.wait(), 30)
 
+    async def schedule_once(self, now: datetime | None = None) -> int:
+        """Enqueue each due (name, window) slot exactly once across all workers."""
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import AsyncSession
+
+        from codura_docs.jobs.billing_period import schedule_windows
+        from codura_docs.jobs.queue import enqueue
+
+        enqueued = 0
+        async with AsyncSession(self.worker_engine) as s, s.begin():
+            for name, window, payload in schedule_windows(now or datetime.now(UTC)):
+                claimed = (
+                    await s.execute(
+                        text(
+                            "INSERT INTO scheduled_runs (name, run_window) VALUES (:n, :w) "
+                            "ON CONFLICT DO NOTHING RETURNING name"
+                        ),
+                        {"n": name, "w": window},
+                    )
+                ).first()
+                if claimed is not None:
+                    await enqueue(s, name, payload)
+                    enqueued += 1
+            await s.execute(
+                text("DELETE FROM scheduled_runs WHERE enqueued_at < now() - interval '35 days'")
+            )
+        return enqueued
+
+    async def _scheduler(self) -> None:
+        while not self.stopping.is_set():
+            try:
+                await self.schedule_once()
+            except Exception:
+                log.exception("scheduler tick failed")
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self.stopping.wait(), 60)
+
     async def serve(self) -> None:
         listener = asyncio.create_task(self._listen())
         reaper = asyncio.create_task(self._reaper())
+        scheduler = (
+            asyncio.create_task(self._scheduler())
+            if self.settings.billing_scheduler_enabled
+            else asyncio.create_task(self.stopping.wait())
+        )
         slots = [asyncio.create_task(self._slot()) for _ in range(self.settings.worker_concurrency)]
         log.info(
             "worker started", extra={"worker_id": self.worker_id, "kinds": handler_registry.kinds()}
@@ -136,9 +180,9 @@ class Worker:
         await self.stopping.wait()
         # Graceful stop: let in-flight Jobs finish (their slot loop exits after the current Job).
         await asyncio.gather(*slots, return_exceptions=True)
-        for task in (listener, reaper):
+        for task in (listener, reaper, scheduler):
             task.cancel()
-        await asyncio.gather(listener, reaper, return_exceptions=True)
+        await asyncio.gather(listener, reaper, scheduler, return_exceptions=True)
         log.info("worker stopped")
 
 

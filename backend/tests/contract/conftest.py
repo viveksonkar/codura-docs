@@ -31,17 +31,66 @@ def _needs(value: str | None, reason: str) -> Any:
     return pytest.mark.skipif(not value, reason=reason)
 
 
+ANTHROPIC_KEY = os.environ.get("CODURA_TEST_ANTHROPIC_KEY")
+ANTHROPIC_FIXTURE = Path(__file__).parent / "fixtures" / "anthropic_stream.txt"
+
+
+def anthropic_recorded_transport() -> Any:
+    """Replays a recorded Messages API stream (M3-12: recorded by default, live nightly)."""
+    import httpx
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            return httpx.Response(200, json={"id": "claude-opus-5-5", "type": "model"})
+        return httpx.Response(
+            200,
+            content=ANTHROPIC_FIXTURE.read_bytes(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    return httpx.MockTransport(handler)
+
+
+def anthropic_profile(api_key: str) -> ModelProfile:
+    return ModelProfile(
+        id="premium",
+        provider="anthropic",
+        model=os.environ.get("CODURA_TEST_ANTHROPIC_MODEL", "claude-opus-5-5"),
+        license="commercial-api",
+        is_local=False,
+        api_key=api_key,
+        price_in_per_mtok_micros=4_000_000,
+        price_out_per_mtok_micros=20_000_000,
+    )
+
+
 @pytest.fixture(
     params=[
         "fake",
+        "anthropic-recorded",
         pytest.param(
             "ollama", marks=[pytest.mark.ollama, _needs(OLLAMA_URL, "set CODURA_TEST_OLLAMA_URL")]
+        ),
+        pytest.param(
+            "anthropic-live",
+            marks=[pytest.mark.anthropic, _needs(ANTHROPIC_KEY, "set CODURA_TEST_ANTHROPIC_KEY")],
         ),
     ]
 )
 async def chat_model(request: pytest.FixtureRequest) -> AsyncIterator[ChatModel]:
     if request.param == "fake":
         yield FakeChatModel("fake")
+        return
+    if request.param.startswith("anthropic"):
+        from codura_docs.adapters.anthropic.chat import AnthropicChatModel
+
+        live = request.param == "anthropic-live"
+        model_a = AnthropicChatModel(
+            anthropic_profile(str(ANTHROPIC_KEY) if live else "sk-ant-test"),
+            transport=None if live else anthropic_recorded_transport(),
+        )
+        yield model_a
+        await model_a.aclose()
         return
     from codura_docs.adapters.ollama.chat import OllamaChatModel
 

@@ -10,8 +10,8 @@ several agents can implement them at once without colliding.
 | [M0.md](./M0.md) | Foundations | Full |
 | [M1.md](./M1.md) | Signup, roles, ingestion + OCR, answering, consoles, usage events | Full |
 | [M2.md](./M2.md) | Web Channel (MVP): Hosted Chat Page + Widget + Visitor email | Full (done 2026-11-24) |
-| [M3.md](./M3.md) | Monetisation: Plans, quotas, payments, finance, model management, Custom LLM | Full (decomposed at M2 exit) |
-| [M4.md](./M4.md) | WordPress plugin & Android | Workstreams |
+| [M3.md](./M3.md) | Monetisation: Plans, quotas, payments, finance, model management, Custom LLM | Full (done 2026-11-24; live Stripe run pending keys) |
+| [M4.md](./M4.md) | WordPress plugin & Android | Full (decomposed at M3 exit) |
 | [M5.md](./M5.md) | Quality & cost optimisation | Workstreams |
 | [M6.md](./M6.md) | Production & observability | Workstreams |
 

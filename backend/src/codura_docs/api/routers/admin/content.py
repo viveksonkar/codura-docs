@@ -12,8 +12,10 @@ from starlette.responses import StreamingResponse
 from codura_docs.api.deps import TenantAccess, require_tenant
 from codura_docs.api.errors import ApiError
 from codura_docs.api.sse import sse_response
+from codura_docs.billing.entitlements import for_tenant, require_channel
 from codura_docs.db.session import tenant_session
 from codura_docs.domain.language import ocr_languages_valid
+from codura_docs.metering import quotas
 from codura_docs.services import answering, channel_keys
 from codura_docs.services import assistants as assistants_svc
 from codura_docs.services import documents as docs
@@ -232,6 +234,16 @@ async def create_assistant(
         raise ApiError(422, "validation_error", "name is required")
     try:
         async with tenant_session(request.app.state.engine, a.ctx) as s:
+            terms = await for_tenant(s, a.tenant_id)
+            if not (await quotas.check_stock(s, terms, "assistants")).allowed:
+                raise ApiError(
+                    409,
+                    "plan_limit",
+                    f"Your plan allows {terms.limit('assistants')} assistants. Upgrade under Billing.",
+                    details={"limit": "assistants"},
+                )
+            if body.hosted_enabled:
+                require_channel(terms, "hosted")
             item = await assistants_svc.create(s, a.tenant_id, body.model_dump(exclude_none=True))
             await channel_keys.sync_hosted_key(
                 s, request.app.state.keyring, a.tenant_id, item["id"], item["hosted_enabled"]
@@ -258,6 +270,8 @@ async def patch_assistant(
 ) -> dict[str, Any]:
     try:
         async with tenant_session(request.app.state.engine, a.ctx) as s:
+            if body.hosted_enabled:
+                require_channel(await for_tenant(s, a.tenant_id), "hosted")
             item = await assistants_svc.update(s, assistant_id, body.model_dump(exclude_none=True))
             if item is not None and body.hosted_enabled is not None:
                 await channel_keys.sync_hosted_key(

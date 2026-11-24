@@ -2,7 +2,12 @@ import { useCallback, useEffect, useState } from "react";
 import { type Me, ApiError, get, post, setCsrf } from "./api";
 import { AssistantDetail, Assistants } from "./pages/assistants";
 import { ForgotPassword, Login, Signup, TokenAction } from "./pages/auth";
-import { PlatformAudit, PlatformModels, PlatformTenants } from "./pages/platform";
+import { PlatformAudit, PlatformTenants } from "./pages/platform";
+import { BillingPage } from "./features/billing/BillingPage";
+import { QuotaBanner } from "./features/billing/QuotaBanner";
+import {
+  PlatformCostRates, PlatformFinance, PlatformInvoices, PlatformModelProfiles, PlatformPlans, PlatformTenantBilling,
+} from "./features/platform/PlatformBilling";
 import { ChannelsPage } from "./features/channels/ChannelsPage";
 import { ConversationDetail, ConversationsPage } from "./features/conversations/ConversationsPage";
 import { InsightsPage } from "./features/insights/InsightsPage";
@@ -69,6 +74,7 @@ export function App() {
             <Link to="/conversations">Conversations</Link>
             <Link to="/insights">Insights</Link>
             <Link to="/members">Users</Link>
+            <Link to="/billing">Billing</Link>
             <Link to="/settings">Settings</Link>
           </nav>
         )}
@@ -76,7 +82,11 @@ export function App() {
           <nav>
             <div className="nav-title">Platform</div>
             <Link to="/platform/tenants">Tenants</Link>
+            <Link to="/platform/plans">Plans</Link>
             <Link to="/platform/models">Model Profiles</Link>
+            <Link to="/platform/finance">Finance</Link>
+            <Link to="/platform/invoices">Invoices</Link>
+            <Link to="/platform/cost-rates">Cost rates</Link>
             <Link to="/platform/audit">Admins & Audit</Link>
           </nav>
         )}
@@ -87,6 +97,7 @@ export function App() {
       </aside>
       <main>
         {tenant && tenant.status === "pending_verification" && !isPlatform && <NotVerified email={me.user.email} />}
+        {tenant && tenant.status !== "pending_verification" && !isPlatform && <QuotaBanner key={tenant.id} path={path} />}
         {!tenant && !isPlatform && (me.user.is_platform_admin
           ? <p>You are a Platform Admin. Open <Link to="/platform/tenants">Tenants</Link>.</p>
           : <p>You are not a member of any organisation yet.</p>)}
@@ -100,7 +111,13 @@ function route(path: string, ctx: { me: Me; canEdit: boolean; refresh: () => Pro
   const { me, canEdit } = ctx;
   if (path.startsWith("/platform")) {
     if (!me.user.is_platform_admin) return <p>Platform Admins only.</p>;
-    if (path === "/platform/models") return <PlatformModels />;
+    let pp: Record<string, string> | null;
+    if ((pp = match("/platform/tenants/:id/billing", path))) return <PlatformTenantBilling key={pp.id} tenantId={pp.id!} />;
+    if (path === "/platform/models") return <PlatformModelProfiles />;
+    if (path === "/platform/plans") return <PlatformPlans />;
+    if (path === "/platform/finance") return <PlatformFinance />;
+    if (path === "/platform/invoices") return <PlatformInvoices />;
+    if (path === "/platform/cost-rates") return <PlatformCostRates />;
     if (path === "/platform/audit") return <PlatformAudit />;
     return <PlatformTenants />;
   }
@@ -116,5 +133,6 @@ function route(path: string, ctx: { me: Me; canEdit: boolean; refresh: () => Pro
   if ((p = match("/conversations/:id", path))) return <ConversationDetail key={p.id} id={p.id!} />;
   if (path === "/conversations") return <ConversationsPage />;
   if (path === "/insights") return <InsightsPage canEdit={canEdit} />;
+  if (path === "/billing") return <BillingPage canEdit={canEdit} />;
   return <Dashboard canEdit={canEdit} />;
 }

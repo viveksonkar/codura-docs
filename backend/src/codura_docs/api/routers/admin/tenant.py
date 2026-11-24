@@ -11,8 +11,10 @@ from sqlalchemy import text
 from codura_docs import metering
 from codura_docs.api.deps import TenantAccess, require_tenant
 from codura_docs.api.errors import ApiError
+from codura_docs.billing.entitlements import for_tenant
 from codura_docs.db.session import tenant_session
 from codura_docs.domain.language import ocr_languages_valid
+from codura_docs.metering import quotas
 from codura_docs.ports.language import SUPPORTED_LANGUAGES
 from codura_docs.services import members
 
@@ -89,7 +91,18 @@ async def usage(request: Request, a: TenantAccess = READ) -> dict[str, Any]:
     settings = request.app.state.settings
     async with tenant_session(request.app.state.engine, a.ctx) as s:
         meters = await metering.usage_summary(s, settings, a.tenant_id)
-    return {"plan": "trial", "period_start": str(metering.period_start()), "meters": meters}
+        terms = await for_tenant(s, a.tenant_id)
+        notices = await quotas.notices(s, a.tenant_id)
+    return {
+        "plan": terms.plan_code,
+        "plan_name": terms.plan_name,
+        "status": terms.status,
+        "trial_ends_at": terms.trial_ends_at,
+        "overage_enabled": terms.overage_enabled,
+        "period_start": str(metering.period_start()),
+        "meters": meters,
+        "notices": notices,
+    }
 
 
 # --- Members -------------------------------------------------------------------------------------
@@ -120,6 +133,7 @@ async def invite(
             org = (
                 await s.execute(text("SELECT name FROM tenants WHERE id = :t"), {"t": a.tenant_id})
             ).scalar_one()
+            seat_limit = (await for_tenant(s, a.tenant_id)).limit("seats")
             invite_id = await members.invite(
                 s,
                 tenant_id=a.tenant_id,
@@ -128,7 +142,7 @@ async def invite(
                 email=body.email.strip().lower(),
                 role=body.role,
                 invited_by=a.principal.user_id,
-                seat_limit=settings.trial_seats,
+                seat_limit=seat_limit,
             )
     except members.MemberError as exc:
         raise ApiError(409, exc.code, str(exc)) from exc

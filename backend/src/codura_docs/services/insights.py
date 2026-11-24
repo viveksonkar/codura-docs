@@ -12,15 +12,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from codura_docs import metering
+from codura_docs.billing.entitlements import for_tenant
 from codura_docs.config import Settings
-
-
-def _projection(used: float, now: datetime) -> float:
-    """Linear projection of this period's usage to the period end (calendar month)."""
-    start = datetime(now.year, now.month, 1, tzinfo=UTC)
-    nxt = datetime(now.year + (now.month == 12), now.month % 12 + 1, 1, tzinfo=UTC)
-    elapsed = max((now - start).total_seconds(), 3600.0)
-    return round(used * (nxt - start).total_seconds() / elapsed, 1)
 
 
 async def summary(
@@ -29,8 +22,7 @@ async def summary(
     now = datetime.now(UTC)
     since = now - timedelta(days=days)
     meters = await metering.usage_summary(session, settings, tenant_id)
-    for m in meters:
-        m["projected"] = _projection(float(m["used"]), now)
+    terms = await for_tenant(session, tenant_id)
     by_channel = (
         await session.execute(
             text(
@@ -73,7 +65,13 @@ async def summary(
     rated = (answers.up or 0) + (answers.down or 0)
     return {
         "days": days,
-        "usage": {"plan": "trial", "period_start": str(metering.period_start()), "meters": meters},
+        "usage": {
+            "plan": terms.plan_code,
+            "plan_name": terms.plan_name,
+            "period_start": str(metering.period_start()),
+            "meters": meters,
+        },
+        "retention_days": int(terms.get("analytics_retention_days")),
         "conversations_by_channel": [{"channel": r.channel, "count": r.n} for r in by_channel],
         "questions_by_language": [{"language": r.language, "count": r.n} for r in by_language],
         "conversations_per_day": [{"day": str(r.day), "count": r.n} for r in per_day],

@@ -41,7 +41,7 @@ async def list_tenants(session: AsyncSession, q: str | None = None) -> list[dict
         (
             await session.execute(
                 text(
-                    "SELECT t.id, t.slug, t.name, t.status, t.plan_code, t.model_profile_override, t.created_at, "
+                    "SELECT t.id, t.slug, t.name, t.status, coalesce((SELECT p.code FROM subscriptions s JOIN plan_versions v ON v.id = s.plan_version_id JOIN plans p ON p.id = v.plan_id WHERE s.tenant_id = t.id), 'free')::text AS plan_code, t.model_profile_override, t.created_at, "
                     "(SELECT count(*) FROM tenant_members m WHERE m.tenant_id = t.id) AS members, "
                     "(SELECT count(*) FROM documents d WHERE d.tenant_id = t.id) AS documents, "
                     "(SELECT coalesce(sum(quantity), 0) FROM usage_counters u WHERE u.tenant_id = t.id AND u.meter = 'answer' "

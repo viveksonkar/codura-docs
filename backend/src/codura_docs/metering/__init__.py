@@ -6,8 +6,8 @@ idempotency keys are no-ops, so Job retries never double-bill (NFR-14).
 
 from __future__ import annotations
 
+import calendar
 import json
-from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any, Literal
 
@@ -21,6 +21,14 @@ from codura_docs.ports.chat import ModelProfile
 Meter = Literal[
     "answer", "answer_custom_llm", "page_ingested", "page_ocr", "storage_mb_day", "seat_day"
 ]
+METERS: tuple[str, ...] = (
+    "answer",
+    "answer_custom_llm",
+    "page_ingested",
+    "page_ocr",
+    "storage_mb_day",
+    "seat_day",
+)
 
 
 def period_start(now: datetime | None = None) -> date:
@@ -38,8 +46,15 @@ async def record(
     idempotency_key: str,
     model_profile_id: str | None = None,
     attrs: dict[str, Any] | None = None,
+    reservation_id: str | None = None,
 ) -> bool:
-    """Write a Usage Event and bump the period counter. Returns False if it was a duplicate."""
+    """Write a Usage Event and bump the period counter. Returns False if it was a duplicate.
+
+    ``reservation_id`` (from ``quotas.admit``) is consumed in the same transaction.
+    """
+    from codura_docs.metering.quotas import note_usage, release
+
+    await release(session, reservation_id)
     inserted = (
         await session.execute(
             text(
@@ -66,10 +81,11 @@ async def record(
             "INSERT INTO usage_counters (tenant_id, meter, period_start, quantity, cogs_micros) "
             "VALUES (:t, :m, :p, :q, :c) ON CONFLICT (tenant_id, meter, period_start) DO UPDATE "
             "SET quantity = usage_counters.quantity + EXCLUDED.quantity, "
-            "cogs_micros = usage_counters.cogs_micros + EXCLUDED.cogs_micros"
+            "cogs_micros = usage_counters.cogs_micros + EXCLUDED.cogs_micros, updated_at = now()"
         ),
         {"t": tenant_id, "m": meter, "p": period_start(), "q": quantity, "c": cogs_micros},
     )
+    await note_usage(session, tenant_id, meter)
     return True
 
 
@@ -93,48 +109,17 @@ async def cost_rate(session: AsyncSession, key: str) -> int:
     return int(value or 0)
 
 
-# --- Quotas (fixed trial limits until Plans arrive in M3) -----------------------------------------
-
-
-@dataclass(frozen=True)
-class QuotaDecision:
-    allowed: bool
-    used: float
-    limit: float | None
-    warn: bool
-
-
-def trial_limit(settings: Settings, meter: Meter) -> float | None:
-    return {
-        "answer": settings.trial_answers,
-        "page_ingested": settings.trial_pages,
-        "page_ocr": settings.trial_ocr_pages,
-    }.get(meter)
-
-
-async def check_quota(
-    session: AsyncSession, settings: Settings, tenant_id: str, meter: Meter, needed: float = 1
-) -> QuotaDecision:
-    limit = trial_limit(settings, meter)
-    used = float(
-        (
-            await session.execute(
-                text(
-                    "SELECT quantity FROM usage_counters WHERE tenant_id = :t AND meter = :m AND period_start = :p"
-                ),
-                {"t": tenant_id, "m": meter, "p": period_start()},
-            )
-        ).scalar()
-        or 0
-    )
-    if limit is None:
-        return QuotaDecision(True, used, None, False)
-    return QuotaDecision(used + needed <= limit, used, limit, used + needed > 0.8 * limit)
+# --- Usage vs Plan (Tenant-facing: quantities only, never COGS) ----------------------------------
 
 
 async def usage_summary(
     session: AsyncSession, settings: Settings, tenant_id: str
 ) -> list[dict[str, Any]]:
+    """Flow meters (this period) and stock limits vs the effective Plan, with a month-end projection."""
+    from codura_docs.billing.entitlements import FLOW_METERS, INCLUDED, for_tenant
+    from codura_docs.metering.quotas import stock_usage
+
+    terms = await for_tenant(session, tenant_id)
     rows = (
         await session.execute(
             text(
@@ -144,7 +129,32 @@ async def usage_summary(
         )
     ).all()
     used = {r.meter: float(r.quantity) for r in rows}
-    meters: list[Meter] = ["answer", "page_ingested", "page_ocr"]
-    return [
-        {"meter": m, "used": used.get(m, 0.0), "limit": trial_limit(settings, m)} for m in meters
-    ]
+    used["answer"] = used.get("answer", 0.0) + used.pop("answer_custom_llm", 0.0)
+    now = datetime.now(UTC)
+    days = calendar.monthrange(now.year, now.month)[1]
+    elapsed = max(1.0, (now - datetime(now.year, now.month, 1, tzinfo=UTC)).total_seconds() / 86400)
+    out: list[dict[str, Any]] = []
+    for meter in FLOW_METERS:
+        value = used.get(meter, 0.0)
+        out.append(
+            {
+                "meter": meter,
+                "kind": "flow",
+                "used": value,
+                "limit": terms.limit(meter),
+                "projected": round(value / elapsed * days, 1),
+            }
+        )
+    stock = await stock_usage(session, tenant_id)
+    for key, (kind, _) in INCLUDED.items():
+        if kind == "stock":
+            out.append({"meter": key, "kind": kind, "used": stock[key], "limit": terms.limit(key)})
+    out.append(
+        {
+            "meter": "page_ingested",
+            "kind": "flow",
+            "used": used.get("page_ingested", 0.0),
+            "limit": None,
+        }
+    )
+    return out

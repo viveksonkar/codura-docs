@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Web Channel parity checklist (channels.md §6, FR-45, M2-09) on the Hosted Chat Page and on the
  * Widget demo page, with real local models:
  *   welcome in the device locale → cited answer → second-language question answered in that
@@ -69,7 +69,8 @@ for (const target of TARGETS) {
       await skipPrechat(chat);
       await expect(chat.locator(".welcome .bubble")).toHaveText(HINDI_WELCOME);
       await expect(chat.locator("button.send")).toHaveText("भेजें");
-      await expect(chat.locator(".foot")).toContainText("Codura");
+      // Demo is on Growth (remove_branding, M3): no "Powered by" footer.
+      await expect(chat.getByText(/Powered by/)).toHaveCount(0);
 
       // 2. Cited answer.
       const first = await ask(chat, "How long is the X200 warranty?");

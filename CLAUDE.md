@@ -92,6 +92,7 @@ cd backend && uv run pytest                       # unit + contract[fake]; integ
   CODURA_TEST_PG_ADMIN_URL=postgresql+psycopg://codura_owner:codura@127.0.0.1:5432/postgres
   (publish Postgres with compose.dev.yml on COMPOSE_FILE)
   CODURA_TEST_OLLAMA_URL=http://localhost:11434 uv run pytest -m ollama   # live model contracts
+  CODURA_TEST_ANTHROPIC_KEY=sk-ant-... uv run pytest -m anthropic       # live Anthropic contract (costs money)
 cd backend && uv run python scripts/live_e2e.py   # real models + OCR + email, end to end
 cd backend && uv run python scripts/eval.py       # golden multilingual eval report
 pnpm -C web install && pnpm -C web -r test && pnpm -C web -r build   # build fails if widget.js > 40 KB gz
@@ -99,6 +100,8 @@ cd tests/e2e && pnpm install --ignore-workspace && pnpm install-browsers && pnpm
 COMPOSE_FILE=docker-compose.yml:compose.egress.yml docker compose up -d   # NFR-01 no-egress stack (CI: e2e.yml)
 ```
 
+Billing: `PAYMENT_PROVIDER=manual` by default (Platform Admin marks invoices paid); Stripe needs
+`STRIPE_SECRET_KEY` + `STRIPE_WEBHOOK_SECRET` (test mode), webhook `/api/webhooks/payments/stripe`.
 Hosted Chat Page: http://localhost:8080/c/demo/help · Widget demo: http://localhost:8080/demo/ (dev only).
 Host-side backend tools live in `backend/.venv/Scripts/` when `uv` isn't on PATH.
 

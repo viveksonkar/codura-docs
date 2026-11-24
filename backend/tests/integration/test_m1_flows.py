@@ -84,6 +84,7 @@ async def stack(pg_database: Settings) -> AsyncIterator[dict[str, Any]]:
     async with app.router.lifespan_context(app):
         yield {"app": app, "registry": registry, "worker": worker}
     await app.state.platform_engine.dispose()
+    await app.state.billing_engine.dispose()
     await app.state.debug_worker_engine.dispose()
 
 
@@ -389,16 +390,13 @@ async def test_m1_end_to_end_and_isolation(
         ).scalar_one()
     assert float(counter) == n_events >= 4
 
-    # --- Trial limit: answers stop without an LLM call --------------------------------------------------------
-    limited_settings = registry.settings.model_copy(update={"trial_answers": int(n_events)})
-    limited = create_app(limited_settings, registry=Registry.from_settings(limited_settings))
-    async with limited.router.lifespan_context(limited):
-        lc = client_for(limited)
-        lc.cookies = a.client.cookies
-        lc.headers["x-csrf-token"] = a.me["csrf_token"]
-        r = await lc.post(
-            f"/api/admin/assistants/{aid}/playground/stream", json={"question": "warranty?"}
-        )
-        assert next(d for n, d in sse_events(r.text) if n == "done")["finish_reason"] == "limit"
-    await limited.state.platform_engine.dispose()
-    await limited.state.debug_worker_engine.dispose()
+    # --- Plan limit: answers stop without an LLM call (Trial has no overage) ---------------------------------
+    override = await plat.put(
+        f"/api/platform/tenants/{a.tenant_id}/billing", json={"included": {"answer": int(n_events)}}
+    )
+    assert override.status_code == 200, override.text
+    r = await a.client.post(
+        f"/api/admin/assistants/{aid}/playground/stream", json={"question": "warranty?"}
+    )
+    assert next(d for n, d in sse_events(r.text) if n == "done")["finish_reason"] == "limit"
+    await plat.put(f"/api/platform/tenants/{a.tenant_id}/billing", json={"included": {}})

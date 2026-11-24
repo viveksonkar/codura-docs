@@ -36,4 +36,5 @@ async def stack(pg_database: Settings) -> AsyncIterator[dict[str, Any]]:
     async with app.router.lifespan_context(app):
         yield {"app": app, "registry": registry, "worker": worker}
     await app.state.platform_engine.dispose()
+    await app.state.billing_engine.dispose()
     await app.state.debug_worker_engine.dispose()

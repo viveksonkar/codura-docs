@@ -152,12 +152,6 @@ class Settings(BaseSettings):
     cookie_secure: bool | None = None  # default: secure when PUBLIC_BASE_URL is https
     session_ttl_hours: int = 12
     signup_enabled: bool = True
-    trial_answers: int = 100
-    trial_pages: int = 200
-    trial_ocr_pages: int = 50
-    trial_max_input_tokens: int = 6000
-    trial_max_output_tokens: int = 800
-    trial_seats: int = 3
 
     # Public Chat API abuse limits (SEC-06). Buckets refill continuously; 0 disables a bucket.
     chat_rate_per_key_per_min: int = 60
@@ -169,6 +163,13 @@ class Settings(BaseSettings):
     public_rate_per_ip_per_min: int = 120  # config, history, feedback
     hosted_lookup_per_ip_per_min: int = 30
     trust_forwarded_for: bool = True  # Caddy is the only entry point (ADR-0013)
+
+    # Payments (specs/billing.md §8, ADR-0026). `manual` makes no network calls (NFR-01).
+    payment_provider: Literal["manual", "stripe"] = "manual"
+    stripe_secret_key: SecretStr | None = None
+    stripe_webhook_secret: SecretStr | None = None
+    stripe_api_base: str = "https://api.stripe.com"
+    billing_scheduler_enabled: bool = True  # worker enqueues rollup/cycle Jobs on a schedule
 
     max_upload_mb: int = 50
     max_pages: int = 500

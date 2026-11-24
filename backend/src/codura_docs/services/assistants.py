@@ -32,6 +32,16 @@ DEFAULT_LIMIT = {
     "ar": "وصل هذا المساعد إلى حد الاستخدام حاليًا. يُرجى المحاولة لاحقًا.",
     "zh": "该助手暂时已达到使用上限，请稍后再试。",
 }
+# Past-due subscriptions (billing.md §7): configured text, never generated.
+DEFAULT_UNAVAILABLE = {
+    "default": "This assistant is temporarily unavailable. Please try again later.",
+    "hi": "यह सहायक अभी अस्थायी रूप से उपलब्ध नहीं है। कृपया बाद में पुनः प्रयास करें।",
+    "es": "Este asistente no está disponible temporalmente. Inténtalo más tarde.",
+    "fr": "Cet assistant est temporairement indisponible. Réessayez plus tard.",
+    "de": "Dieser Assistent ist vorübergehend nicht verfügbar. Bitte versuchen Sie es später erneut.",
+    "ar": "هذا المساعد غير متاح مؤقتًا. يُرجى المحاولة لاحقًا.",
+    "zh": "该助手暂时不可用，请稍后再试。",
+}
 DEFAULT_WELCOME = {"default": "Hi! Ask me anything about our documents."}
 EDITABLE = (
     "name",

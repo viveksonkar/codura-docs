@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Browser e2e against the running compose stack (M1-14 UI e2e, M2-09 web parity).
  *   docker compose up -d   # then:
  *   pnpm --dir tests/e2e install && pnpm --dir tests/e2e install-browsers && pnpm --dir tests/e2e test
@@ -11,7 +11,7 @@ export const MAILPIT_URL = process.env.CODURA_E2E_MAILPIT_URL ?? "http://localho
 
 export default defineConfig({
   testDir: ".",
-  testMatch: ["web-channel/**/*.spec.ts", "admin/**/*.spec.ts"],
+  testMatch: ["web-channel/**/*.spec.ts", "admin/**/*.spec.ts", "billing/**/*.spec.ts"],
   globalSetup: "./global-setup.ts",
   timeout: 240_000,
   expect: { timeout: 90_000 },
